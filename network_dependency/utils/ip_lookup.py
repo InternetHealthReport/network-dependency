@@ -2,7 +2,7 @@ import configparser
 import logging
 import radix
 import sys
-from KafkaReader import KafkaReader
+from network_dependency.kafka.kafka_reader import KafkaReader
 
 
 class IPLookup:

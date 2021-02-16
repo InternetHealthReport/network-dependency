@@ -1,27 +1,23 @@
+import argparse
+from collections import defaultdict
 import configparser
+from datetime import datetime
 import logging
 import sys
-from datetime import datetime, timezone
-from ASPath import ASPath
-from KafkaReader import KafkaReader
-from KafkaWriter import KafkaWriter
-from IPLookup import IPLookup
-import AtlasAPIHelper
+from network_dependency.utils.as_path import ASPath
+from network_dependency.kafka.kafka_reader import KafkaReader
+from network_dependency.kafka.kafka_writer import KafkaWriter
+from network_dependency.utils.ip_lookup import IPLookup
+from network_dependency.utils import atlas_api_helper
+from network_dependency.utils.helper_functions import convert_date_to_epoch
 
 stats = {'total': 0,
+         'accepted': 0,
          'dnf': 0,
          'single_as': 0,
          'start_as_missing': 0,
-         'end_as_missing': 0}
-
-
-def convert_date_to_epoch(s) -> int:
-    """Parse date from config file"""
-    try:
-        return int(datetime.strptime(s, "%Y-%m-%dT%H:%M").replace(tzinfo=timezone.utc).timestamp())
-    except ValueError:
-        # Not a valid date:
-        return 0
+         'end_as_missing': 0,
+         'tmp': 0}
 
 
 def process_hop(hop: dict, lookup: IPLookup) -> (int, str):
@@ -64,12 +60,13 @@ def process_hop(hop: dict, lookup: IPLookup) -> (int, str):
         return lookup.ip2asn(address), address
 
 
-def process_message(msg: dict, lookup: IPLookup, msm_ids=None,
-                    target_asn=None) -> dict:
+def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
+                    msm_ids=None, target_asn=None) -> dict:
     global stats
     if msm_ids is not None and msg['msm_id'] not in msm_ids:
         return dict()
-    dst_addr = AtlasAPIHelper.get_dst_addr(msg)
+    stats['total'] += 1
+    dst_addr = atlas_api_helper.get_dst_addr(msg)
     if not dst_addr:
         return dict()
     dst_asn = lookup.ip2asn(dst_addr)
@@ -92,7 +89,7 @@ def process_message(msg: dict, lookup: IPLookup, msm_ids=None,
         logging.error('Failed to look up peer_asn for peer_address {}'
                       .format(msg['from']))
         return dict()
-    stats['total'] += 1
+    stats['accepted'] += 1
     path = ASPath()
     path.set_start_end_asn(peer_asn, dst_asn)
     traceroute = msg['result']
@@ -107,8 +104,6 @@ def process_message(msg: dict, lookup: IPLookup, msm_ids=None,
                         .format(reduced_path))
         stats['single_as'] += 1
         return dict()
-    if dst_asn != 7500:
-        print(dst_asn)
     ret = {'rec': {'status': 'valid',
                    'time': unified_timestamp},
            'elements': [{
@@ -121,6 +116,12 @@ def process_message(msg: dict, lookup: IPLookup, msm_ids=None,
                    }
                }]
            }
+    if msg['prb_id'] in msm_probe_map[msg['msm_id']]:
+        logging.debug('Skipping duplicate probe result for msm_id {} prb_id {}'
+                      .format(msg['msm_id'], msg['prb_id']))
+        return dict()
+    stats['tmp'] += 1
+    msm_probe_map[msg['msm_id']].add(msg['prb_id'])
     return ret
 
 
@@ -128,26 +129,33 @@ def print_stats() -> None:
     if stats['total'] == 0:
         print('No values.')
         return
-    p = 100 / stats['total']
+    p_total = 100 / stats['total']
+    p_accepted = 100 / stats['accepted']
     print(f'           Total: {stats["total"]:6d} {100:6.2f}%')
-    print(f'             DNF: {stats["dnf"]:6d} {p * stats["dnf"]:6.2f}%')
-    print(f'       Single AS: {stats["single_as"]:6d} {p * stats["single_as"]:6.2f}%')
-    print(f'Start AS missing: {stats["start_as_missing"]:6d} {p * stats["start_as_missing"]:6.2f}%')
-    print(f'  End AS Missing: {stats["end_as_missing"]:6d} {p * stats["end_as_missing"]:6.2f}%')
+    print(f'        Accepted: {stats["accepted"]:6d} {p_total * stats["accepted"]:6.2f}% {100:6.2f}%')
+    print(f'             DNF: {stats["dnf"]:6d} {p_total * stats["dnf"]:6.2f}% {p_accepted * stats["dnf"]:6.2f}%')
+    print(f'       Single AS: {stats["single_as"]:6d} {p_total * stats["single_as"]:6.2f}% {p_accepted * stats["single_as"]:6.2f}%')
+    print(f'Start AS missing: {stats["start_as_missing"]:6d} {p_total * stats["start_as_missing"]:6.2f}% {p_accepted * stats["start_as_missing"]:6.2f}%')
+    print(f'  End AS Missing: {stats["end_as_missing"]:6d} {p_total * stats["end_as_missing"]:6.2f}% {p_accepted * stats["end_as_missing"]:6.2f}%')
+    print(stats['tmp'])
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('config')
     # Logging
     FORMAT = '%(asctime)s %(processName)s %(message)s'
     logging.basicConfig(
         format=FORMAT, filename='traceroute_to_bgp.log',
-        level=logging.WARNING, datefmt='%Y-%m-%d %H:%M:%S'
+        level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S'
         )
     logging.info("Started: %s" % sys.argv)
 
+    args = parser.parse_args()
+
     # Read config
     config = configparser.ConfigParser()
-    config.read('../conf/default.ini')
+    config.read(args.config)
     start = convert_date_to_epoch(config.get('input', 'start'))
     stop = convert_date_to_epoch(config.get('input', 'stop'))
     if start == 0 or stop == 0:
@@ -183,11 +191,12 @@ if __name__ == '__main__':
     bootstrap_servers = config.get('kafka', 'bootstrap_servers')
 
     lookup = IPLookup(config)
+    msm_probe_map = defaultdict(set)
     reader = KafkaReader([traceroute_kafka_topic], bootstrap_servers, start * 1000, stop * 1000)
     writer = KafkaWriter(output_kafka_topic, bootstrap_servers)
     with reader, writer:
         for msg in reader.read():
-            data = process_message(msg, lookup, msm_ids, target_asn)
+            data = process_message(msg, lookup, msm_probe_map, msm_ids, target_asn)
             if not data:
                 continue
             writer.write(None, data, unified_timestamp * 1000)
