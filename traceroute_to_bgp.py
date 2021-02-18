@@ -197,7 +197,7 @@ if __name__ == '__main__':
     FORMAT = '%(asctime)s %(processName)s %(message)s'
     logging.basicConfig(
         format=FORMAT, filename='traceroute_to_bgp.log',
-        level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S'
+        level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S'
         )
     logging.info("Started: %s" % sys.argv)
 
