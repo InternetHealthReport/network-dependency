@@ -19,11 +19,13 @@ stats = {'total': 0,
          'no_peer_asn': 0,
          'accepted': 0,
          'dnf': 0,
+         'empty_path': 0,
          'single_as': 0,
          'used': 0,
          'start_as_missing': 0,
          'end_as_missing': 0,
-         'ixp_in_path': 0}
+         'ixp_in_path': 0,
+         'scopes': set()}
 
 
 def process_hop(hop: dict, lookup: IPLookup) -> (int, str):
@@ -117,8 +119,10 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
             is_ixp = True
         path.append(asn, address, is_ixp)
     reduced_path, reduced_path_len = path.get_reduced_path(stats)
-    if reduced_path_len <= 1:
-        logging.debug('Reduced AS path is too short (<=1 AS): {}'
+    if reduced_path_len == 0:
+        return dict()
+    elif reduced_path_len == 1:
+        logging.debug('Reduced AS path is too short (=1 AS): {}'
                       .format(reduced_path))
         stats['single_as'] += 1
         return dict()
@@ -140,6 +144,7 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
            }
     if path.get_reduced_ixp_indexes():
         stats['ixp_in_path'] += 1
+    stats['scopes'].add(dst_asn)
     msm_probe_map[msg['msm_id']].add(msg['prb_id'])
     return ret
 
@@ -169,6 +174,9 @@ def print_stats() -> None:
     print(f'             DNF: {stats["dnf"]:6d} '
           f'{p_total * stats["dnf"]:6.2f}% '
           f'{p_accepted * stats["dnf"]:6.2f}%')
+    print(f'      Empty path: {stats["empty_path"]:6d} '
+          f'{p_total * stats["empty_path"]:6.2f}% '
+          f'{p_accepted * stats["empty_path"]:6.2f}%')
     print(f'       Single AS: {stats["single_as"]:6d} '
           f'{p_total * stats["single_as"]:6.2f}% '
           f'{p_accepted * stats["single_as"]:6.2f}%')
@@ -188,6 +196,7 @@ def print_stats() -> None:
           f'{p_total * stats["ixp_in_path"]:6.2f}% '
           f'{p_accepted * stats["ixp_in_path"]:6.2f}% '
           f'{p_used * stats["ixp_in_path"]:6.2f}%')
+    print(f'          Scopes: {stats["scopes"]}')
 
 
 if __name__ == '__main__':
@@ -287,6 +296,8 @@ if __name__ == '__main__':
         update_writer.write(None, fake, (unified_timestamp + 1) * 1000)
     stats_writer = KafkaWriter(output_kafka_topic_prefix + '_stats', bootstrap_servers)
     with stats_writer:
+        # Convert set to list so that msgpack does not explode.
+        stats['scopes'] = list(stats['scopes'])
         entry = {'start': start,
                  'stop': stop,
                  'msm_ids': list(msm_ids),

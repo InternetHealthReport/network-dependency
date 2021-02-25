@@ -41,6 +41,7 @@ class ASPath:
         self.reduced_ixp_nodes = list()
         path = list()
         if len(self.nodes) == 0:
+            stats['empty_path'] += 1
             return str(), 0
         unique_as = set()
         for idx, node in enumerate(self.nodes):
@@ -55,6 +56,7 @@ class ASPath:
         if len(path) == 0:
             logging.debug('Empty path after filtering: {}'
                           .format(self.nodes))
+            stats['empty_path'] += 1
             return str(), 0
         if self.start_as != 0 and path[0] != self.start_as:
             if stats is not None:
