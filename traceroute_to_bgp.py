@@ -9,7 +9,7 @@ from network_dependency.kafka.kafka_reader import KafkaReader
 from network_dependency.kafka.kafka_writer import KafkaWriter
 from network_dependency.utils.ip_lookup import IPLookup
 from network_dependency.utils import atlas_api_helper
-from network_dependency.utils.helper_functions import convert_date_to_epoch
+from network_dependency.utils.helper_functions import convert_date_to_epoch, parse_timestamp_argument
 
 stats = {'total': 0,
          'no_dst_addr': 0,
@@ -95,7 +95,7 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
         stats['no_prefix'] += 1
         return dict()
     if 'from' not in msg or not msg['from']:
-        logging.error('No "from" in result {}'.format(msg))
+        logging.debug('No "from" in result {}'.format(msg))
         stats['no_from'] += 1
         return dict()
     peer_asn = lookup.ip2asn(msg['from'])
@@ -193,6 +193,12 @@ def print_stats() -> None:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('config')
+    parser.add_argument('-s', '--start', help='Start timestamp (as UNIX epoch '
+                                              'in seconds or milliseconds, or'
+                                              'in YYYY-MM-DDThh:mm format)')
+    parser.add_argument('-e', '--stop', help='Stop timestamp (as UNIX epoch '
+                                             'in seconds or milliseconds, or'
+                                             'in YYYY-MM-DDThh:mm format)')
     # Logging
     FORMAT = '%(asctime)s %(processName)s %(message)s'
     logging.basicConfig(
@@ -206,13 +212,26 @@ if __name__ == '__main__':
     # Read config
     config = configparser.ConfigParser()
     config.read(args.config)
-    start = convert_date_to_epoch(config.get('input', 'start'))
-    stop = convert_date_to_epoch(config.get('input', 'stop'))
+    start_ts_argument = config.get('input', 'start', fallback=None)
+    stop_ts_argument = config.get('input', 'stop', fallback=None)
+    if args.start is not None:
+        logging.info('Overriding config start timestamp.')
+        start_ts_argument = args.start
+    if args.stop is not None:
+        logging.info('Overriding config stop timestamp.')
+        stop_ts_argument = args.stop
+    start = parse_timestamp_argument(start_ts_argument)
+    stop = parse_timestamp_argument(stop_ts_argument)
     if start == 0 or stop == 0:
         logging.error('Invalid start or end time specified: {} {}'
-                      .format(config.get('input', 'start'),
-                              config.get('input', 'stop')))
+                      .format(start_ts_argument, stop_ts_argument))
         exit(1)
+    logging.info('Start timestamp: {} {}'
+                 .format(datetime.utcfromtimestamp(start)
+                         .strftime('%Y-%m-%dT%H:%M'), start))
+    logging.info('Stop timestamp: {} {}'
+                 .format(datetime.utcfromtimestamp(stop)
+                         .strftime('%Y-%m-%dT%H:%M'), stop))
     traceroute_kafka_topic = config.get('input', 'kafka_topic',
                                         fallback='ihr_atlas_traceroutev4')
     output_kafka_topic_prefix = config.get('output', 'kafka_topic_prefix',
@@ -229,15 +248,16 @@ if __name__ == '__main__':
         logging.info('Filtering for target ASN: {}'.format(target_asn))
     output_timestamp = config.get('output', 'time', fallback=None)
     if output_timestamp is None:
-        unified_timestamp = int(datetime.utcnow().timestamp())
+        logging.warning('No output time specified. Using the stop timestamp.')
+        unified_timestamp = stop
     else:
         unified_timestamp = convert_date_to_epoch(output_timestamp)
         if unified_timestamp == 0:
             logging.error('Invalid output time specified: {}'
                           .format(output_timestamp))
-    logging.info('Output timestamp: {}'
+    logging.info('Output timestamp: {} {}'
                  .format(datetime.utcfromtimestamp(unified_timestamp)
-                         .strftime('%Y-%m-%dT%H:%M')))
+                         .strftime('%Y-%m-%dT%H:%M'), unified_timestamp))
     bootstrap_servers = config.get('kafka', 'bootstrap_servers')
 
     lookup = IPLookup(config)
