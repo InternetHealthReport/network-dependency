@@ -29,22 +29,22 @@ stats = {'total': 0,
 def process_hop(hop: dict, lookup: IPLookup) -> (int, str):
     global stats
     if 'error' in hop:
-        logging.warning('Traceroute did not reach destination: {}'
-                        .format(msg))
+        logging.debug('Traceroute did not reach destination: {}'
+                      .format(msg))
         stats['dnf'] += 1
         return -1, str()
     replies = hop['result']
     reply_addresses = set()
     for reply in replies:
         if 'error' in reply:
-            logging.warning('Skipping erroneous reply in traceroute: {}'
-                            .format(msg))
+            logging.debug('Skipping erroneous reply in traceroute: {}'
+                          .format(msg))
             continue
         if 'x' in reply:
             reply_addresses.add('*')
             continue
         if 'from' not in reply:
-            logging.error('No "from" in hop {}'.format(msg))
+            logging.debug('No "from" in hop {}'.format(msg))
             reply_addresses.add('*')
         else:
             reply_addresses.add(reply['from'])
@@ -55,8 +55,8 @@ def process_hop(hop: dict, lookup: IPLookup) -> (int, str):
         # applicable) so that a real IP is chosen.
         reply_addresses.discard('*')
     if len(reply_addresses) == 0:
-        logging.warning('Traceroute did not reach destination: {}'
-                        .format(msg))
+        logging.debug('Traceroute did not reach destination: {}'
+                      .format(msg))
         stats['dnf'] += 1
         return -1, str()
     address = reply_addresses.pop()
@@ -82,7 +82,7 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
         return dict()
     dst_asn = lookup.ip2asn(dst_addr)
     if dst_asn == 0:
-        logging.error('Failed to look up destination AS for destination'
+        logging.debug('Failed to look up destination AS for destination'
                       ' address {}'.format(dst_addr))
         stats['no_dst_asn'] += 1
         return dict()
@@ -90,7 +90,7 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
         return dict()
     prefix = lookup.ip2prefix(dst_addr)
     if not prefix:
-        logging.error('Failed to look up prefix for destination address {}'
+        logging.debug('Failed to look up prefix for destination address {}'
                       .format(dst_addr))
         stats['no_prefix'] += 1
         return dict()
@@ -100,7 +100,7 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
         return dict()
     peer_asn = lookup.ip2asn(msg['from'])
     if peer_asn == 0:
-        logging.error('Failed to look up peer_asn for peer_address {}'
+        logging.debug('Failed to look up peer_asn for peer_address {}'
                       .format(msg['from']))
         stats['no_peer_asn'] += 1
         return dict()
@@ -118,8 +118,8 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
         path.append(asn, address, is_ixp)
     reduced_path, reduced_path_len = path.get_reduced_path(stats)
     if reduced_path_len <= 1:
-        logging.warning('Reduced AS path is too short (<=1 AS): {}'
-                        .format(reduced_path))
+        logging.debug('Reduced AS path is too short (<=1 AS): {}'
+                      .format(reduced_path))
         stats['single_as'] += 1
         return dict()
     stats['used'] += 1

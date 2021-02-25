@@ -83,7 +83,7 @@ class IPLookup:
         try:
             node = self.ixp_rtree.search_best(ip)
         except ValueError as e:
-            logging.error('Wrong IP address format: {} {}'.format(ip, e))
+            logging.debug('Wrong IP address format: {} {}'.format(ip, e))
             return str()
         if node is None:
             return str()
@@ -97,7 +97,7 @@ class IPLookup:
         try:
             node = self.ixp_rtree.search_best(ip)
         except ValueError as e:
-            logging.error('Wrong IP address format: {} {}'.format(ip, e))
+            logging.debug('Wrong IP address format: {} {}'.format(ip, e))
             return str()
         if node is None:
             return str()

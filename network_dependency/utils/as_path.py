@@ -53,8 +53,8 @@ class ASPath:
             unique_as.add(as_)
             path.append(as_)
         if len(path) == 0:
-            logging.warning('Empty path after filtering: {}'
-                            .format(self.nodes))
+            logging.debug('Empty path after filtering: {}'
+                          .format(self.nodes))
             return str(), 0
         if self.start_as != 0 and path[0] != self.start_as:
             if stats is not None:
