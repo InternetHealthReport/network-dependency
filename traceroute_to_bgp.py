@@ -114,10 +114,12 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
         asn, address = process_hop(hop, lookup)
         if asn == -1:
             return dict()
-        is_ixp = False
-        if lookup.ip2ixp(address):
-            is_ixp = True
-        path.append(asn, address, is_ixp)
+        ixp_id = lookup.ip2ixpid(address)
+        if ixp_id != 0:
+            # We represent IXPs with negative "AS numbers".
+            ixp_id *= -1
+            path.append(ixp_id, address, ixp=True)
+        path.append(asn, address, ixp=False)
     reduced_path, reduced_path_len = path.get_reduced_path(stats)
     if reduced_path_len == 0:
         return dict()

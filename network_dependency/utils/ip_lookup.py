@@ -45,12 +45,15 @@ class IPLookup:
         reader = KafkaReader([topic], bootstrap_servers)
         with reader:
             for val in reader.read():
-                if 'prefix' not in val or 'name' not in val:
+                if 'prefix' not in val \
+                        or 'name' not in val \
+                        or 'ix_id' not in val:
                     logging.warning('Received invalid entry from Kafka: {}'
                                     .format(val))
                     continue
                 node = self.ixp_rtree.add(val['prefix'])
                 node.data['name'] = val['name']
+                node.data['id'] = val['ix_id']
 
     def __fill_ixp_asn_dict_from_kafka(self, topic: str,
                                        bootstrap_servers: str):
@@ -78,7 +81,7 @@ class IPLookup:
             return self.ixp_asn_dict[ip]
         return 0
 
-    def ip2ixp(self, ip: str) -> str:
+    def ip2ixpname(self, ip: str) -> str:
         """Find the IXP name corresponding to the given IP address."""
         try:
             node = self.ixp_rtree.search_best(ip)
@@ -88,6 +91,19 @@ class IPLookup:
         if node is None:
             return str()
         return node.data['name']
+
+    def ip2ixpid(self, ip: str) -> int:
+        """Find the IXP id corresponding to the given IP address.
+
+        The IXP id corresponds to PeeringDB's ix_id."""
+        try:
+            node = self.ixp_rtree.search_best(ip)
+        except ValueError as e:
+            logging.debug('Wrong IP address format: {} {}'.format(ip, e))
+            return 0
+        if node is None:
+            return 0
+        return node.data['id']
 
     def ip2prefix(self, ip: str) -> str:
         """Find the IP prefix containing the given IP address."""

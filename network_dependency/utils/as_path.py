@@ -65,6 +65,9 @@ class ASPath:
                           'Prepending it now.'
                           .format(self.start_as))
             path.insert(0, self.start_as)
+            # Shift IXP indexes, since we added a node at the beginning
+            # of the path after the index calculation.
+            self.reduced_ixp_nodes = [e + 1 for e in self.reduced_ixp_nodes]
         if self.end_as != 0 and path[-1] != self.end_as:
             if stats is not None:
                 stats['end_as_missing'] += 1
