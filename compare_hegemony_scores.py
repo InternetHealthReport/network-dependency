@@ -3,60 +3,11 @@ import configparser
 from datetime import datetime
 import logging
 import sys
-from network_dependency.kafka.kafka_reader import KafkaReader
-from network_dependency.utils.scope import Scope
 from network_dependency.utils.helper_functions import parse_timestamp_argument
+from network_dependency.utils.scope import read_scopes
 
 stats = {'overlapping': {'set': set(),
                          'num': 0}}
-
-
-def read_legacy_scopes(topic: str,
-                       timestamp: int,
-                       bootstrap_servers: str,
-                       scope_as_filter=None) -> dict:
-    ret = dict()
-    reader = KafkaReader([topic], bootstrap_servers, timestamp, timestamp + 1)
-    logging.debug('Reading topic {} at timestamp {}'.format(topic, timestamp))
-    with reader:
-        for msg in reader.read():
-            scope = msg['scope']
-            if scope == 0 \
-                    or (scope_as_filter is not None
-                        and scope not in scope_as_filter):
-                continue
-            if scope not in ret:
-                ret[scope] = Scope(scope)
-            ret[scope].add_as(msg['asn'], msg['hege'])
-    return ret
-
-
-def read_scopes(topic: str,
-                timestamp: int,
-                bootstrap_servers: str,
-                scope_as_filter=None) -> dict:
-    ret = dict()
-    reader = KafkaReader([topic], bootstrap_servers, timestamp, timestamp + 1)
-    logging.debug('Reading topic {} at timestamp {}'.format(topic, timestamp))
-    with reader:
-        for msg in reader.read():
-            scope = msg['scope']
-            if scope == 0 \
-                    or (scope_as_filter is not None
-                        and scope not in scope_as_filter):
-                continue
-            if scope in ret:
-                logging.error('Duplicate scope {} for timestamp {}'
-                              .format(scope, timestamp))
-                continue
-            ret[scope] = Scope(scope)
-            for as_ in msg['scope_hegemony']:
-                # Skip IXPs for now.
-                if int(as_) < 0:
-                    continue
-                ret[scope].add_as(as_, msg['scope_hegemony'][as_])
-    return ret
-
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -127,7 +78,7 @@ if __name__ == '__main__':
         print('BGP - TR')
         print(f' Set: {bgp_scope.not_in(tr_scope)}')
         print(f'Size: {len(bgp_scope.not_in(tr_scope))}')
-        print(f'Score differences: {tr_scope.get_score_deltas(bgp_scope)}')
+        print(f'Score differences: {tr_scope.get_score_deltas_for_overlap(bgp_scope)}')
         print(f'Missing score sum: {bgp_scope.get_missing_score_sum(tr_scope)}')
         print(f'  Rank difference: {bgp_scope.get_rank_difference_number(tr_scope)}')
         print(f'        Magnitude: {bgp_scope.get_rank_difference_magnitudes(tr_scope)}')

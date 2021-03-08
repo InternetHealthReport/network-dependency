@@ -1,5 +1,5 @@
 import logging
-
+from network_dependency.kafka.kafka_reader import KafkaReader
 
 class Scope:
     def __init__(self, as_: int):
@@ -36,6 +36,10 @@ class Scope:
         """Return overlapping ASs between self and other."""
         return self.as_dependencies.intersection(other.as_dependencies)
 
+    def union(self, other) -> set:
+        """Return all ASs that are contained in either self or other."""
+        return self.as_dependencies.union(other.as_dependencies)
+
     def get_overlap_percentage_with(self, other) -> float:
         """Return percentage of overlapping ASs between self and other,
         using self as the reference (i.e., self is 100%)."""
@@ -46,13 +50,30 @@ class Scope:
         intersect = self.overlap_with(other)
         return (100 / len(self.as_dependencies)) * len(intersect)
 
-    def get_score_deltas(self, other) -> list:
+    def get_score_deltas_for_overlap(self, other) -> list:
         """Return list of tupels (as, score_diff) indicating the score
         difference for ASs that are contained in both self and other.
 
         Calculate the score difference as self.score - other.score."""
         return [(as_, self.hegemony_scores[as_] - other.hegemony_scores[as_])
                 for as_ in self.overlap_with(other)]
+
+    def get_score_deltas_for_union(self, other) -> list:
+        """Return list of tupels (as, score_diff) indicating the score
+        difference for ASs that are contained in either self or other.
+
+        Calculate the score difference as self.score - other.score.
+        Replace missing scores with zero."""
+        ret = list()
+        for as_ in self.union(other):
+            self_score = 0
+            other_score = 0
+            if as_ in self.as_dependencies:
+                self_score = self.hegemony_scores[as_]
+            if as_ in other.as_dependencies:
+                other_score = other.hegemony_scores[as_]
+            ret.append((as_, self_score - other_score))
+        return ret
 
     def get_missing_score_sum(self, other) -> float:
         """Return the sum of scores for ASs that are contained in self
@@ -106,3 +127,50 @@ class Scope:
                 continue
             ret.append((as_, idx, idx - other_idx))
         return ret
+
+
+def read_legacy_scopes(topic: str,
+                       timestamp: int,
+                       bootstrap_servers: str,
+                       scope_as_filter=None) -> dict:
+    ret = dict()
+    reader = KafkaReader([topic], bootstrap_servers, timestamp, timestamp + 1)
+    logging.debug('Reading topic {} at timestamp {}'.format(topic, timestamp))
+    with reader:
+        for msg in reader.read():
+            scope = msg['scope']
+            if scope == 0 \
+                    or (scope_as_filter is not None
+                        and scope not in scope_as_filter):
+                continue
+            if scope not in ret:
+                ret[scope] = Scope(scope)
+            ret[scope].add_as(msg['asn'], msg['hege'])
+    return ret
+
+
+def read_scopes(topic: str,
+                timestamp: int,
+                bootstrap_servers: str,
+                scope_as_filter=None) -> dict:
+    ret = dict()
+    reader = KafkaReader([topic], bootstrap_servers, timestamp, timestamp + 1)
+    logging.debug('Reading topic {} at timestamp {}'.format(topic, timestamp))
+    with reader:
+        for msg in reader.read():
+            scope = msg['scope']
+            if scope == 0 \
+                    or (scope_as_filter is not None
+                        and scope not in scope_as_filter):
+                continue
+            if scope in ret:
+                logging.error('Duplicate scope {} for timestamp {}'
+                              .format(scope, timestamp))
+                continue
+            ret[scope] = Scope(scope)
+            for as_ in msg['scope_hegemony']:
+                # Skip IXPs for now.
+                if int(as_) < 0:
+                    continue
+                ret[scope].add_as(as_, msg['scope_hegemony'][as_])
+    return ret
