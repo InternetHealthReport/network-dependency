@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def plot(data: dict, output: str) -> None:
+def plot(data: dict, output: str, title: str) -> None:
     x = list()
     y = list()
     for as_ in data:
@@ -32,6 +32,7 @@ def plot(data: dict, output: str) -> None:
     ax = fig.add_axes(rect_scatter)
     ax_histx = fig.add_axes(rect_histx, sharex=ax)
     ax_histy = fig.add_axes(rect_histy, sharey=ax)
+    ax_histx.set_title(title)
     # no labels
     ax_histx.tick_params(axis="x", labelbottom=False)
     ax_histy.tick_params(axis="y", labelleft=False)
@@ -48,7 +49,7 @@ def plot(data: dict, output: str) -> None:
     ax.scatter(x, y)
 
     # now determine nice limits by hand:
-    binwidth = 0.1
+    binwidth = 0.05
     xymax = max(np.max(np.abs(x)), np.max(np.abs(y)))
     lim = (int(xymax / binwidth) + 1) * binwidth
 
@@ -56,7 +57,7 @@ def plot(data: dict, output: str) -> None:
     ax_histx.hist(x, bins=bins)
     ax_histy.hist(y, bins=bins, orientation='horizontal')
 
-    plt.savefig(output)
+    plt.savefig(output, bbox_inches='tight')
 
 
 if __name__ == '__main__':
@@ -122,39 +123,52 @@ if __name__ == '__main__':
     #     logging.info('BGP scopes without matching traceroute scope: {}'
     #                  .format(bgp_scopes.keys() - traceroute_scopes.keys()))
     plot_data_overlap = dict()
+    raw_data_overlap = dict()
     plot_data_union = dict()
+    raw_data_union = dict()
     for as_ in traceroute_scopes.keys() & bgp_scopes.keys():
         if as_ == '-1':
             continue
         traceroute_scope = traceroute_scopes[as_]
         bgp_scope = bgp_scopes[as_]
-        scores_overlap = [abs(s) for _, s in
-                          traceroute_scope
-                              .get_score_deltas_for_overlap(bgp_scope)]
-        scores_union = [abs(s) for _, s in
-                        traceroute_scope.get_score_deltas_for_union(bgp_scope)]
+        deltas_overlap = traceroute_scope \
+            .get_score_deltas_for_overlap(bgp_scope)
+        deltas_union = traceroute_scope.get_score_deltas_for_union(bgp_scope)
+        scores_overlap = [abs(s) for _, s in deltas_overlap]
+        scores_union = [abs(s) for _, s in deltas_union]
         # Maximum and average.
         if scores_overlap:
             plot_data_overlap[as_] = (max(scores_overlap),
                                       sum(scores_overlap) / len(scores_overlap))
+            raw_data_overlap[as_] = deltas_overlap
         plot_data_union[as_] = (max(scores_union),
                                 sum(scores_union) / len(scores_union))
+        raw_data_union[as_] = deltas_union
     output_dir = config.get('output', 'directory', fallback='./')
     if not output_dir.endswith('/'):
         output_dir += '/'
-    output_dir += datetime.utcfromtimestamp(timestamp) \
-                      .strftime('%Y-%m-%dT%H:%M') + '/'
+    out_date = datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%dT%H:%M')
+    output_dir += out_date + '/'
     os.makedirs(output_dir, exist_ok=True)
     out_lines_overlap = ['as max avg\n']
+    out_lines_overlap_raw = list()
     out_lines_union = ['as max avg\n']
+    out_lines_union_raw = list()
     for as_ in plot_data_overlap:
         mx, avg = plot_data_overlap[as_]
         out_lines_overlap.append(' '.join(map(str, [as_, mx, avg])) + '\n')
+        out_lines_overlap_raw.append(' '.join(map(str, [as_] + raw_data_overlap[as_])) + '\n')
+    for as_ in plot_data_union:
         mx, avg = plot_data_union[as_]
         out_lines_union.append(' '.join(map(str, [as_, mx, avg])) + '\n')
+        out_lines_union_raw.append(' '.join(map(str, [as_] + raw_data_union[as_])) + '\n')
     with open(output_dir + 'overlap.dat', 'w') as fo, \
-            open(output_dir + 'union.dat', 'w') as fu:
+            open(output_dir + 'overlap-raw.dat', 'w') as foraw, \
+            open(output_dir + 'union.dat', 'w') as fu, \
+            open(output_dir + 'union-raw.dat', 'w') as furaw:
         fo.writelines(out_lines_overlap)
+        foraw.writelines(out_lines_overlap_raw)
         fu.writelines(out_lines_union)
-    plot(plot_data_overlap, output_dir + 'overlap.pdf')
-    plot(plot_data_union, output_dir + 'union.pdf')
+        furaw.writelines(out_lines_union_raw)
+    plot(plot_data_overlap, output_dir + 'overlap.pdf', out_date)
+    plot(plot_data_union, output_dir + 'union.pdf', out_date)
