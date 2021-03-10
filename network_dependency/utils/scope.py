@@ -1,11 +1,13 @@
 import logging
 from network_dependency.kafka.kafka_reader import KafkaReader
 
+
 class Scope:
     def __init__(self, as_: int):
         self.as_ = as_
         self.as_dependencies = set()
         self.hegemony_scores = dict()
+        self.is_ixp_dependent = False
 
     def add_as(self, as_: int, score: float) -> None:
         # The scope contains itself with a value of 1.0, but we can
@@ -171,6 +173,7 @@ def read_scopes(topic: str,
             for as_ in msg['scope_hegemony']:
                 # Skip IXPs for now.
                 if int(as_) < 0:
+                    ret[scope].is_ixp_dependent = True
                     continue
                 ret[scope].add_as(as_, msg['scope_hegemony'][as_])
     return ret
