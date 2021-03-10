@@ -23,8 +23,10 @@ class Scope:
         self.as_dependencies.add(as_)
         self.hegemony_scores[as_] = score
 
-    def get_score(self, as_) -> float:
+    def get_score(self, as_, return_default=False) -> float:
         if as_ not in self.hegemony_scores:
+            if return_default:
+                return 0
             logging.error('Trying to get score for AS {} which is not ' +
                           'contained in scope {}'.format(as_, self.as_))
             return -1

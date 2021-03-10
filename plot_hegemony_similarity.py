@@ -71,6 +71,57 @@ def plot_scopes(data: dict, x_metric: str, y_metric: str, output: str, title: st
     plt.savefig(output, bbox_inches='tight')
 
 
+def plot_raw_scores(data: dict, output: str, title: str) -> None:
+    # definitions for the axes
+    left, width = 0.1, 0.65
+    bottom, height = 0.1, 0.65
+    spacing = 0.035
+
+    rect_scatter = [left, bottom, width, height]
+    rect_histx = [left, bottom + height + spacing, width, 0.2]
+    rect_histy = [left + width + spacing, bottom, 0.2, height]
+
+    # start with a square Figure
+    fig = plt.figure(figsize=(8, 8))
+
+    ax = fig.add_axes(rect_scatter)
+    ax_histx = fig.add_axes(rect_histx, sharex=ax)
+    ax_histy = fig.add_axes(rect_histy, sharey=ax)
+    ax_histx.set_title(title)
+    # no labels
+    ax_histx.tick_params(axis="x", labelbottom=False)
+    ax_histy.tick_params(axis="y", labelleft=False)
+
+    # the scatter plot:
+    ax.set_xlim(0, 1)
+    ax.set_xticks(np.arange(0, 1.1, 0.1))
+    ax.set_xlabel('traceroute')
+    ax.set_ylim(0, 1)
+    ax.set_yticks(np.arange(0, 1.1, 0.1))
+    ax.set_ylabel('BGP')
+    ax.grid(which='both')
+    ax.plot([0, 1], [0, 1], c='gray', ls='--')
+
+    agg_x = list()
+    agg_y = list()
+    for as_ in data:
+        x, y = zip(*data[as_])
+        agg_x += x
+        agg_y += y
+        ax.scatter(x, y)
+
+    # now determine nice limits by hand:
+    binwidth = 0.05
+    xymax = max(np.max(np.abs(agg_x)), np.max(np.abs(agg_y)))
+    lim = (int(xymax / binwidth) + 1) * binwidth
+
+    bins = np.arange(0, lim + binwidth, binwidth)
+    ax_histx.hist(agg_x, bins=bins)
+    ax_histy.hist(agg_y, bins=bins, orientation='horizontal')
+
+    plt.savefig(output, bbox_inches='tight')
+
+
 def get_stats(data: list, ixp_dependent: bool):
     min_ = np.min(data)
     max_ = np.max(data)
@@ -167,11 +218,16 @@ if __name__ == '__main__':
     raw_data_overlap = dict()
     plot_data_union = dict()
     raw_data_union = dict()
+    raw_scores = dict()
     for as_ in traceroute_scopes.keys() & bgp_scopes.keys():
         if as_ == '-1':
             continue
         traceroute_scope = traceroute_scopes[as_]
         bgp_scope = bgp_scopes[as_]
+        raw_scores[as_] = list()
+        for dep_as in traceroute_scope.union(bgp_scope):
+            raw_scores[as_].append((traceroute_scope.get_score(dep_as, True),
+                                    bgp_scope.get_score(dep_as, True)))
         ixp_dependent = traceroute_scope.is_ixp_dependent
         deltas_overlap = traceroute_scope \
             .get_score_deltas_for_overlap(bgp_scope)
@@ -200,3 +256,4 @@ if __name__ == '__main__':
     plot_scopes(plot_data_overlap, 'max', 'median', output_dir + 'overlap_max_median.pdf', out_date)
     plot_scopes(plot_data_union, 'max', 'avg', output_dir + 'union_max_avg.pdf', out_date)
     plot_scopes(plot_data_union, 'max', 'median', output_dir + 'union_max_median.pdf', out_date)
+    plot_raw_scores(raw_scores, output_dir + 'raw.pdf', out_date)
