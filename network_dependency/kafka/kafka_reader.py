@@ -27,6 +27,12 @@ class KafkaReader:
         self.timeout_in_s = 10
 
     def __enter__(self):
+        self.subscribe()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def subscribe(self):
         self.consumer = Consumer({
             'bootstrap.servers': self.bootstrap_servers,
             'group.id': self.topics[0] + '_reader',
@@ -37,9 +43,9 @@ class KafkaReader:
         logging.debug('Created consumer and subscribed to topic(s) {}.'
                       .format(self.topics))
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def close(self):
         self.consumer.close()
-        logging.debug('Closed consumer.')
+        logging.info('Closed consumer.')
 
     def __on_assign(self, consumer: Consumer, partitions: list):
         """Position the consumer to the offset corresponding to the
