@@ -68,8 +68,10 @@ def process_msg(msg):
     value = msgpack.unpackb(msg.value(), raw=False)
     if value['msm_id'] != 5051 and value['msm_id'] != 5151:
         return
+    failed = False
     dst_addr = atlas_api_helper.get_dst_addr(value)
     if not dst_addr:
+        failed = True
         dst_asn = 0
         prefix = None
     else:
@@ -79,7 +81,6 @@ def process_msg(msg):
         peer_asn = 0
     else:
         peer_asn = lookup.ip2asn(value['from'])
-    failed = False
     for hop in value['result']:
         if 'error' in hop:
             failed = True
@@ -90,7 +91,7 @@ def process_msg(msg):
            'failed': failed,
            'peer_asn': peer_asn,
            'dst_asn': dst_asn,
-           'dst_pxf': prefix}
+           'dst_pfx': prefix}
     write(value['msm_id'].to_bytes(length=4, byteorder='big'), out, value['timestamp'] * 1000)
 
 
