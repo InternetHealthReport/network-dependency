@@ -31,3 +31,33 @@ def parse_timestamp_argument(arg: str) -> int:
         # Invalid format.
         return 0
     return convert_date_to_epoch(arg)
+
+
+def parse_range_argument(arg: str) -> list:
+    """Parse a range argument which can either be a single integer, a
+    comma-separated list of integers, or in a range specification with
+    format start:end:step.
+
+    Return an empty list if the argument can not be parsed."""
+    if arg is None:
+        return list()
+    if arg.isdigit():
+        return [int(arg)]
+    if ',' in arg:
+        values = arg.split(',')
+        ret = list()
+        for v in values:
+            if not v.isdigit():
+                return list()
+            ret.append(int(v))
+        return ret
+    if ':' in arg:
+        arg_split = arg.split(':')
+        if len(arg_split) != 3:
+            return list()
+        for v in arg_split:
+            if not v.isdigit():
+                return list()
+        range_spec = tuple(map(int, arg_split))
+        return [i for i in range(*range_spec)]
+    return list()
