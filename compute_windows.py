@@ -2,7 +2,6 @@ import argparse
 import bz2
 import logging
 import os
-import pickle
 from collections import namedtuple
 from datetime import timedelta
 from multiprocessing import Pool
@@ -11,9 +10,8 @@ from sys import exit
 import msgpack
 
 from network_dependency.utils.helper_functions import parse_range_argument
+from time_bin.utils.helper_functions import load_bins
 
-MAX_ASN = 69551
-MAX_PFX = 752954
 COMPRESSED_OUTPUT_SUFFIX = '.msgpack.bz2'
 OUTPUT_SUFFIX = '.dat'
 OUTPUT_SEPARATOR = ' '
@@ -21,17 +19,7 @@ OUTPUT_SEPARATOR = ' '
 WindowResult = namedtuple('WindowResult', 'start end size length')
 
 
-def load_bins(bin_file: str) -> (str, timedelta, list):
-    data = pickle.load(bz2.open(bin_file, 'rb'))
-    logging.info('Loaded bin {} mode: {} bin_size: {} bins: {}'
-                 .format(bin_file, data['mode'], str(data['bin_size']),
-                         len(data['data'])))
-    return data['mode'], data['bin_size'], data['data']
-
-
-def assign_computations(mode: str,
-                        bin_size: timedelta,
-                        bins: list,
+def assign_computations(bins: dict,
                         target_p: list,
                         target_c: list,
                         output_dir: str,
@@ -39,8 +27,9 @@ def assign_computations(mode: str,
     arguments = list()
     for c in target_c:
         for p in target_p:
-            for idx in range(len(bins)):
-                arguments.append((mode, bin_size, idx, bins, p, c, output_dir))
+            coverage_target = (bins['unique_dst'] / 100) * p
+            for idx in range(len(bins['data'])):
+                arguments.append((bins['bin_size'], idx, bins['data'], coverage_target, p, c, output_dir))
 
     logging.info('Assigning {} window calculations to {} workers.'
                  .format(len(arguments), threads))
@@ -50,17 +39,8 @@ def assign_computations(mode: str,
     return windows
 
 
-def compute_window(mode: str,
-                   bin_size: timedelta,
-                   start_idx: int,
-                   bins: list,
-                   target_p: int,
-                   target_c: int,
+def compute_window(bin_size: timedelta, start_idx: int, bins: list, coverage_target: int, target_p: int, target_c: int,
                    output_dir: str) -> (int, int, WindowResult):
-    if mode == 'as':
-        coverage_target = (MAX_ASN / 100) * target_p
-    else:
-        coverage_target = (MAX_PFX / 100) * target_p
     covered_destinations = dict()
     uncovered_destinations = dict()
     bin_times, bin_values = zip(*bins)
@@ -179,8 +159,8 @@ def main() -> None:
     if not output_dir.endswith('/'):
         output_dir += '/'
 
-    mode, bin_size, bins = load_bins(args.bins)
-    windows = assign_computations(mode, bin_size, bins, target_p, target_c,
+    bins = load_bins(args.bins)
+    windows = assign_computations(bins, target_p, target_c,
                                   output_dir, args.threads)
     write_summaries(windows, output_dir)
 
