@@ -4,12 +4,12 @@ import logging
 import sys
 
 import confluent_kafka
+import msgpack
 from confluent_kafka import Consumer, Producer, TopicPartition, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
-import msgpack
 
-from network_dependency.utils.ip_lookup import IPLookup
 from network_dependency.utils import atlas_api_helper
+from network_dependency.utils.ip_lookup import IPLookup
 
 BOOTSTRAP_SERVERS = 'kafka1:9092,kafka2:9092,kafka3:9092'
 IN_TOPIC = 'ihr_atlas_traceroutev4'
@@ -98,6 +98,8 @@ def process_msg(msg):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('config')
+    parser.add_argument('-st', '--start', help='Start reading at this '
+                                               'timestamp')
 
     # Logging
     FORMAT = '%(asctime)s %(processName)s %(message)s'
@@ -118,15 +120,19 @@ if __name__ == '__main__':
         'group.id': 'fast_reader',
         'auto.offset.reset': 'earliest',
         'max.poll.interval.ms': 1800 * 1000
-        })
+    })
     producer = Producer({
         'bootstrap.servers': BOOTSTRAP_SERVERS,
         'default.topic.config': {
             'compression.codec': 'snappy'
-            }
-        })
+        }
+    })
     prepare_topic()
-    partition = TopicPartition(IN_TOPIC, partition=2, offset=confluent_kafka.OFFSET_BEGINNING)
+    if args.start:
+        partition = TopicPartition(IN_TOPIC, partition=2, offset=int(args.start) * 1000)
+        partition = consumer.offsets_for_times([partition])[0]
+    else:
+        partition = TopicPartition(IN_TOPIC, partition=2, offset=confluent_kafka.OFFSET_BEGINNING)
     msg_count = 0
     try:
         consumer.assign([partition])
