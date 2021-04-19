@@ -17,13 +17,15 @@ IN_TOPIC = 'traceroutev4_as_pairs'
 BOOTSTRAP_SERVERS = 'kafka1:9092,kafka2:9092,kafka3:9092'
 
 TS_FMT = '%Y-%m-%dT%H:%M'
-ASPair = namedtuple('ASPair', 'peer dst')
+Record = namedtuple('Record', 'prb_id peer dst')
+Result = namedtuple('Result', 'prb_id dst bin_times bin_values')
 
 
-def process_msg(msg, mode: str, msm_ids: set) -> ASPair:
+def process_msg(msg, mode: str, msm_ids: set) -> Record:
     value = msgpack.unpackb(msg.value(), raw=False)
     if value['msm_id'] not in msm_ids:
-        return ASPair(None, None)
+        return Record(None, None, None)
+    prb_id = value['prb_id']
     peer = value['peer_asn']
     dst = None
     if mode == 'as':
@@ -32,13 +34,10 @@ def process_msg(msg, mode: str, msm_ids: set) -> ASPair:
             dst = None
     elif mode == 'pfx':
         dst = value['dst_pfx']
-    return ASPair(peer, dst)
+    return Record(prb_id, peer, dst)
 
 
-def compute_bins(mode: str,
-                 msm_ids: set,
-                 start_ts: int,
-                 end_ts: int) -> (list, list):
+def compute_bins(mode: str, msm_ids: set, start_ts: int, end_ts: int) -> Result:
     consumer = Consumer({
         'bootstrap.servers': BOOTSTRAP_SERVERS,
         'group.id': 'compute_bins',
@@ -57,6 +56,8 @@ def compute_bins(mode: str,
     bin_start = None
     bin_end = None
     curr_bin_values = dict()
+    unique_prb_id = set()
+    unique_dst = set()  # Depends on the mode
     try:
         consumer.assign([partition])
         _, high_watermark = consumer.get_watermark_offsets(partition)
@@ -91,6 +92,10 @@ def compute_bins(mode: str,
                 if val.peer not in curr_bin_values[val.dst]:
                     curr_bin_values[val.dst][val.peer] = 0
                 curr_bin_values[val.dst][val.peer] += 1
+                if val.prb_id not in unique_prb_id:
+                    unique_prb_id.add(val.prb_id)
+                if val.dst not in unique_dst:
+                    unique_dst.add(val.dst)
             msg_count += 1
             if msg.offset() + 1 >= high_watermark:
                 logging.info('Reached high watermark.')
@@ -101,19 +106,17 @@ def compute_bins(mode: str,
                                      high_watermark - msg.offset()))
     finally:
         consumer.close()
-    return bin_times, bin_values
+    return Result(unique_prb_id, unique_dst, bin_times, bin_values)
 
 
-def write_output(mode: str,
-                 bin_times: list,
-                 bin_values: list,
-                 output_dir: str) -> None:
-    range_start = bin_times[0].strftime(TS_FMT)
-    range_end = (bin_times[-1] + BIN_SIZE).strftime(TS_FMT)
+def write_output(mode: str, res: Result, output_dir: str) -> None:
+    range_start = res.bin_times[0].strftime(TS_FMT)
+    range_end = (res.bin_times[-1] + BIN_SIZE).strftime(TS_FMT)
     out_file = output_dir + 'bins.' + range_start + '--' + range_end \
                + '.pickle.bz2'
-    out_data = {'mode': mode, 'bin_size': BIN_SIZE,
-                'data': list(zip(bin_times, bin_values))}
+    out_data = {'mode': mode, 'probes': len(res.prb_id),
+                'unique_dst': len(res.dst), 'bin_size': BIN_SIZE,
+                'data': list(zip(res.bin_times, res.bin_values))}
     with bz2.open(out_file, 'wb') as f:
         pickle.dump(out_data, f, pickle.HIGHEST_PROTOCOL)
 
@@ -167,8 +170,8 @@ def main() -> None:
                              .strftime(TS_FMT)))
     os.makedirs(output_dir, exist_ok=True)
 
-    bin_times, bin_values = compute_bins(args.mode, msm_ids, start_ts, end_ts)
-    write_output(args.mode, bin_times, bin_values, output_dir)
+    res = compute_bins(args.mode, msm_ids, start_ts, end_ts)
+    write_output(args.mode, res, output_dir)
 
 
 if __name__ == '__main__':
