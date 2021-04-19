@@ -18,7 +18,7 @@ BOOTSTRAP_SERVERS = 'kafka1:9092,kafka2:9092,kafka3:9092'
 
 TS_FMT = '%Y-%m-%dT%H:%M'
 Record = namedtuple('Record', 'prb_id peer dst')
-Result = namedtuple('Result', 'prb_id dst bin_times bin_values')
+Result = namedtuple('Result', 'prb_id peer dst bin_times bin_values')
 
 
 def process_msg(msg, mode: str, msm_ids: set) -> Record:
@@ -57,6 +57,7 @@ def compute_bins(mode: str, msm_ids: set, start_ts: int, end_ts: int) -> Result:
     bin_end = None
     curr_bin_values = dict()
     unique_prb_id = set()
+    unique_peer_asn = set()
     unique_dst = set()  # Depends on the mode
     try:
         consumer.assign([partition])
@@ -94,6 +95,8 @@ def compute_bins(mode: str, msm_ids: set, start_ts: int, end_ts: int) -> Result:
                 curr_bin_values[val.dst][val.peer] += 1
                 if val.prb_id not in unique_prb_id:
                     unique_prb_id.add(val.prb_id)
+                if val.peer not in unique_peer_asn:
+                    unique_peer_asn.add(val.peer)
                 if val.dst not in unique_dst:
                     unique_dst.add(val.dst)
             msg_count += 1
@@ -106,7 +109,7 @@ def compute_bins(mode: str, msm_ids: set, start_ts: int, end_ts: int) -> Result:
                                      high_watermark - msg.offset()))
     finally:
         consumer.close()
-    return Result(unique_prb_id, unique_dst, bin_times, bin_values)
+    return Result(unique_prb_id, unique_peer_asn, unique_dst, bin_times, bin_values)
 
 
 def write_output(mode: str, res: Result, output_dir: str) -> None:
@@ -115,7 +118,8 @@ def write_output(mode: str, res: Result, output_dir: str) -> None:
     out_file = output_dir + 'bins.' + range_start + '--' + range_end \
                + '.pickle.bz2'
     out_data = {'mode': mode, 'probes': len(res.prb_id),
-                'unique_dst': len(res.dst), 'bin_size': BIN_SIZE,
+                'peer_as': len(res.peer), 'unique_dst': len(res.dst),
+                'bin_size': BIN_SIZE,
                 'data': list(zip(res.bin_times, res.bin_values))}
     with bz2.open(out_file, 'wb') as f:
         pickle.dump(out_data, f, pickle.HIGHEST_PROTOCOL)
