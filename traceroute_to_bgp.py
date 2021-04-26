@@ -1,15 +1,16 @@
 import argparse
-from collections import defaultdict
 import configparser
-from datetime import datetime
 import logging
 import sys
-from network_dependency.utils.as_path import ASPath
+from collections import defaultdict
+from datetime import datetime
+
 from network_dependency.kafka.kafka_reader import KafkaReader
 from network_dependency.kafka.kafka_writer import KafkaWriter
-from network_dependency.utils.ip_lookup import IPLookup
 from network_dependency.utils import atlas_api_helper
+from network_dependency.utils.as_path import ASPath
 from network_dependency.utils.helper_functions import convert_date_to_epoch, parse_timestamp_argument
+from network_dependency.utils.ip_lookup import IPLookup
 
 stats = {'total': 0,
          'no_dst_addr': 0,
@@ -25,24 +26,34 @@ stats = {'total': 0,
          'start_as_missing': 0,
          'end_as_missing': 0,
          'ixp_in_path': 0,
+         'as_set': 0,
          'scopes': set()}
 
 
-def process_hop(hop: dict, lookup: IPLookup) -> (int, str):
+def process_hop(hop: dict, lookup: IPLookup, path: ASPath) -> bool:
     global stats
     if 'error' in hop:
+        # Packet send failed.
         logging.debug('Traceroute did not reach destination: {}'
                       .format(msg))
         stats['dnf'] += 1
-        return -1, str()
+        return True
     replies = hop['result']
     reply_addresses = set()
     for reply in replies:
         if 'error' in reply:
+            # This seems to be a bug that happens if sending the packet
+            # only fails for _some_ of the probes for a single hop.
+            # Should be treated the same as 'error' in hop.
+            stats['dnf'] += 1
+            return True
+        if 'err' in reply:
+            # Reply received with ICMP error (e.g., network unreachable)
             logging.debug('Skipping erroneous reply in traceroute: {}'
                           .format(msg))
             continue
         if 'x' in reply:
+            # Timeout
             reply_addresses.add('*')
             continue
         if 'from' not in reply:
@@ -50,22 +61,43 @@ def process_hop(hop: dict, lookup: IPLookup) -> (int, str):
             reply_addresses.add('*')
         else:
             reply_addresses.add(reply['from'])
+    if len(reply_addresses) == 0:
+        logging.debug('Traceroute did not reach destination: {}'
+                      .format(msg))
+        stats['dnf'] += 1
+        return True
     if len(reply_addresses) > 1:
         logging.debug('Responses from different sources: {}.'
                       .format(reply_addresses))
         # Remove timeout placeholder from set (if
         # applicable) so that a real IP is chosen.
         reply_addresses.discard('*')
-    if len(reply_addresses) == 0:
-        logging.debug('Traceroute did not reach destination: {}'
-                      .format(msg))
-        stats['dnf'] += 1
-        return -1, str()
-    address = reply_addresses.pop()
-    if address == '*':
-        return 0, str()
+    if len(reply_addresses) > 1:
+        # Still a set after * removal. Add as set.
+        as_set = list()
+        ip_set = list()
+        contains_ixp = False
+        for address in reply_addresses:
+            ixp = lookup.ip2ixpid(address)
+            if ixp != 0:
+                # We represent IXPs with negative "AS numbers".
+                as_set.append(ixp * -1)
+                ip_set.append(address)
+                contains_ixp = True
+            as_set.append(lookup.ip2asn(address))
+            ip_set.append(address)
+        path.append_set(tuple(as_set), tuple(ip_set), contains_ixp)
     else:
-        return lookup.ip2asn(address), address
+        address = reply_addresses.pop()
+        if address == '*':
+            path.append(0, '*')
+        else:
+            ixp = lookup.ip2ixpid(address)
+            if ixp != 0:
+                # We represent IXPs with negative "AS numbers".
+                path.append(ixp * -1, address, ixp=True)
+            path.append(lookup.ip2asn(address), address)
+    return False
 
 
 def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
@@ -111,16 +143,9 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
     path.set_start_end_asn(peer_asn, dst_asn)
     traceroute = msg['result']
     for hop in traceroute:
-        asn, address = process_hop(hop, lookup)
-        if asn == -1:
+        if process_hop(hop, lookup, path):
             return dict()
-        ixp_id = lookup.ip2ixpid(address)
-        if ixp_id != 0:
-            # We represent IXPs with negative "AS numbers".
-            ixp_id *= -1
-            path.append(ixp_id, address, ixp=True)
-        path.append(asn, address, ixp=False)
-    reduced_path, reduced_path_len = path.get_reduced_path(stats)
+    reduced_path, reduced_ip_path, reduced_path_len = path.get_reduced_path(stats)
     if reduced_path_len == 0:
         return dict()
     elif reduced_path_len == 1:
@@ -128,6 +153,7 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
                       .format(reduced_path))
         stats['single_as'] += 1
         return dict()
+    raw_path, raw_ip_path = path.get_raw_path()
     stats['used'] += 1
     ret = {'rec': {'status': 'valid',
                    'time': unified_timestamp},
@@ -137,11 +163,14 @@ def process_message(msg: dict, lookup: IPLookup, msm_probe_map: dict,
                'peer_asn': peer_asn,
                'fields': {
                    'as-path': reduced_path,
+                   'ip-path': reduced_ip_path,
                    'ixp-path-indexes': path.get_reduced_ixp_indexes(),
-                   'full-as-path': path.get_raw_path(),
+                   'full-as-path': raw_path,
+                   'full-ip-path': raw_ip_path,
                    'full-ixp-path-indexes': path.get_raw_ixp_indexes(),
-                   'prefix': prefix
-                   }
+                   'prefix': prefix,
+                   'path-attributes:': path.attributes
+               }
                }]
            }
     if path.get_reduced_ixp_indexes():
@@ -198,6 +227,10 @@ def print_stats() -> None:
           f'{p_total * stats["ixp_in_path"]:6.2f}% '
           f'{p_accepted * stats["ixp_in_path"]:6.2f}% '
           f'{p_used * stats["ixp_in_path"]:6.2f}%')
+    print(f'  AS set in path: {stats["as_set"]:6d} '
+          f'{p_total * stats["as_set"]:6.2f}% '
+          f'{p_accepted * stats["as_set"]:6.2f}% '
+          f'{p_used * stats["as_set"]:6.2f}%')
     print(f'          Scopes: {stats["scopes"]}')
 
 
