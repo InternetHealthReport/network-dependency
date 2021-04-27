@@ -13,13 +13,13 @@ def get_dst_addr(result: dict) -> str:
         return str()
     if 4400 <= fw < 4460:
         if 'addr' not in result:
-            logging.warning('No destination address in result (maybe DNS resolution failed): {}'
-                            .format(result))
+            logging.debug('No destination address in result (maybe DNS '
+                          'resolution failed): {}'.format(result))
             return str()
         return result['addr']
     if 4460 <= fw:
         if 'dst_addr' not in result:
-            logging.warning('No destination address in result (maybe DNS resolution failed): {}'
-                            .format(result))
+            logging.debug('No destination address in result (maybe DNS '
+                          'resolution failed): {}'.format(result))
             return str()
         return result['dst_addr']
