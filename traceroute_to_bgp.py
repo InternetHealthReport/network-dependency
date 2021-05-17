@@ -355,10 +355,13 @@ def main() -> None:
                                bootstrap_servers)
     with stats_writer:
         # Convert set to list so that msgpack does not explode.
+        msm_id_list = list()
+        if msm_ids:
+            msm_id_list = list(msm_ids)
         stats['scopes'] = list(stats['scopes'])
         entry = {'start': start,
                  'stop': stop,
-                 'msm_ids': list(msm_ids),
+                 'msm_ids': msm_id_list,
                  'target_asn': target_asn,
                  'stats': stats}
         stats_writer.write(None, entry, unified_timestamp * 1000)
