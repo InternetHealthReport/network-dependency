@@ -35,8 +35,10 @@ class KafkaWriter:
         """
         admin_client = AdminClient({'bootstrap.servers':
                                         self.bootstrap_servers})
-        topic_list = [NewTopic(self.topic, num_partitions=1,
-                               replication_factor=2)]
+        topic_list = [NewTopic(self.topic, num_partitions=2,
+                               replication_factor=2,
+                               # 1 month
+                               config={'retention.ms': '2592000000'})]
         created_topic = admin_client.create_topics(topic_list)
         for topic, f in created_topic.items():
             try:
