@@ -1,10 +1,11 @@
 import argparse
 import configparser
-from datetime import datetime
 import logging
 import sys
+from datetime import datetime
+
 from network_dependency.utils.helper_functions import parse_timestamp_argument
-from network_dependency.utils.scope import read_scopes
+from network_dependency.utils.scope import read_legacy_scopes
 
 stats = {'overlapping': {'set': set(),
                          'num': 0}}
@@ -12,16 +13,18 @@ stats = {'overlapping': {'set': set(),
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('config')
-    parser.add_argument('-t', '--timestamp', help='Timestamp (as UNIX epoch'
-                                                  'in seconds or '
-                                                  'milliseconds, or in '
-                                                  'YYYY-MM-DDThh:mm format)')
+    parser.add_argument('-tt', '--traceroute_timestamp',
+                        help='Timestamp (as UNIX epoch in seconds or '
+                             'milliseconds, or in YYYY-MM-DDThh:mm format)')
+    parser.add_argument('-bt', '--bgp_timestamp',
+                        help='Timestamp (as UNIX epoch in seconds or '
+                             'milliseconds, or in YYYY-MM-DDThh:mm format)')
     # Logging
     FORMAT = '%(asctime)s %(processName)s %(message)s'
     logging.basicConfig(
-        format=FORMAT, #filename='../compare_results.log',
+        format=FORMAT,  # filename='../compare_results.log',
         level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S',
-        )
+    )
     logging.info("Started: %s" % sys.argv)
 
     args = parser.parse_args()
@@ -29,18 +32,27 @@ if __name__ == '__main__':
     # Read config
     config = configparser.ConfigParser()
     config.read(args.config)
-    timestamp_argument = config.get('input', 'timestamp', fallback=None)
-    if args.timestamp is not None:
-        logging.info('Overriding config timestamp.')
-        timestamp_argument = args.timestamp
-    timestamp = parse_timestamp_argument(timestamp_argument)
-    if timestamp == 0:
-        logging.error('Invalid timestamp specified: {}'
-                      .format(timestamp_argument))
+    traceroute_timestamp_argument = config.get('input', 'traceroute_timestamp', fallback=None)
+    if args.traceroute_timestamp is not None:
+        logging.info('Overriding config traceroute timestamp.')
+        traceroute_timestamp_argument = args.traceroute_timestamp
+    traceroute_timestamp = parse_timestamp_argument(traceroute_timestamp_argument)
+    if traceroute_timestamp == 0:
+        logging.error('Invalid traceroute timestamp specified: {}'
+                      .format(traceroute_timestamp_argument))
+        exit(1)
+    bgp_timestamp_argument = config.get('input', 'bgp_timestamp', fallback=None)
+    if args.bgp_timestamp is not None:
+        logging.info('Overriding config BGP timestamp.')
+        traceroute_timestamp_argument = args.bgp_timestamp
+    bgp_timestamp = parse_timestamp_argument(bgp_timestamp_argument)
+    if bgp_timestamp == 0:
+        logging.error('Invalid BGP timestamp specified: {}'
+                      .format(bgp_timestamp_argument))
         exit(1)
     logging.info('Timestamp: {} {}'
-                 .format(datetime.utcfromtimestamp(timestamp)
-                         .strftime('%Y-%m-%dT%H:%M'), timestamp))
+                 .format(datetime.utcfromtimestamp(traceroute_timestamp)
+                         .strftime('%Y-%m-%dT%H:%M'), traceroute_timestamp))
     bgp_kafka_topic = config.get('input', 'bgp_kafka_topic',
                                  fallback='ihr_hegemony')
     traceroute_kafka_topic = config.get('input', 'traceroute_kafka_topic',
@@ -52,15 +64,15 @@ if __name__ == '__main__':
         scope_as_filter = None
     if scope_as_filter is not None:
         scope_as_filter = set(scope_as_filter.split(','))
-    bgp_scopes = read_scopes(bgp_kafka_topic,
-                             timestamp * 1000,
-                             bootstrap_servers,
-                             scope_as_filter)
-    traceroute_scopes = read_scopes(traceroute_kafka_topic,
-                                    timestamp * 1000,
+    bgp_scopes = read_legacy_scopes(bgp_kafka_topic,
+                                    bgp_timestamp * 1000,
                                     bootstrap_servers,
                                     scope_as_filter)
-    out_lines = [config.get('input', 'timestamp') + ',' + str(timestamp) + '\n']
+    traceroute_scopes = read_legacy_scopes(traceroute_kafka_topic,
+                                           traceroute_timestamp * 1000,
+                                           bootstrap_servers,
+                                           scope_as_filter)
+    out_lines = [config.get('input', 'traceroute_timestamp') + ',' + str(traceroute_timestamp) + '\n']
     for tr_scope_as in traceroute_scopes:
         if tr_scope_as == '-1':
             continue
@@ -83,7 +95,6 @@ if __name__ == '__main__':
         print(f'  Rank difference: {bgp_scope.get_rank_difference_number(tr_scope)}')
         print(f'        Magnitude: {bgp_scope.get_rank_difference_magnitudes(tr_scope)}')
         print('')
-        continue
         print(tr_scope_as, tr_scope.not_in(bgp_scope), bgp_scope.not_in(tr_scope),
               bgp_scope.get_overlap_percentage_with(tr_scope))
         line = [tr_scope_as, ' '.join(map(str, tr_scope.not_in(bgp_scope))),
@@ -95,6 +106,5 @@ if __name__ == '__main__':
             print(f'  {int(i):6d} {tr_score * 100:6.2f} {bgp_score * 100:6.2f} {(tr_score - bgp_score) * 100:=+7.2f}')
             line = ['', i, tr_score * 100, bgp_score * 100, (tr_score - bgp_score) * 100]
             out_lines.append(','.join(map(str, line)) + '\n')
-    exit(0)
     with open(config.get('output', 'file_name'), 'w') as f:
         f.writelines(out_lines)

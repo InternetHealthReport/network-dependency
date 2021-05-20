@@ -1,14 +1,16 @@
 import argparse
-from collections import namedtuple
 import configparser
-from datetime import datetime
 import logging
 import os
 import sys
-from network_dependency.utils.helper_functions import parse_timestamp_argument
-from network_dependency.utils.scope import read_scopes
-import numpy as np
+from collections import namedtuple
+from datetime import datetime
+
 import matplotlib.pyplot as plt
+import numpy as np
+
+from network_dependency.utils.helper_functions import parse_timestamp_argument
+from network_dependency.utils.scope import read_legacy_scopes
 
 Stats = namedtuple('Stats', 'min max avg median ixp')
 
@@ -154,16 +156,18 @@ def write_raw_data(data: dict, output_file: str):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('config')
-    parser.add_argument('-t', '--timestamp', help='Timestamp (as UNIX epoch'
-                                                  'in seconds or '
-                                                  'milliseconds, or in '
-                                                  'YYYY-MM-DDThh:mm format)')
+    parser.add_argument('-tt', '--traceroute_timestamp',
+                        help='Timestamp (as UNIX epoch in seconds or '
+                             'milliseconds, or in YYYY-MM-DDThh:mm format)')
+    parser.add_argument('-bt', '--bgp_timestamp',
+                        help='Timestamp (as UNIX epoch in seconds or '
+                             'milliseconds, or in YYYY-MM-DDThh:mm format)')
     # Logging
     FORMAT = '%(asctime)s %(processName)s %(message)s'
     logging.basicConfig(
         format=FORMAT,  # filename='../compare_results.log',
         level=logging.DEBUG, datefmt='%Y-%m-%d %H:%M:%S',
-        )
+    )
     logging.info("Started: %s" % sys.argv)
 
     args = parser.parse_args()
@@ -171,18 +175,27 @@ if __name__ == '__main__':
     # Read config
     config = configparser.ConfigParser()
     config.read(args.config)
-    timestamp_argument = config.get('input', 'timestamp', fallback=None)
-    if args.timestamp is not None:
-        logging.info('Overriding config timestamp.')
-        timestamp_argument = args.timestamp
-    timestamp = parse_timestamp_argument(timestamp_argument)
-    if timestamp == 0:
-        logging.error('Invalid timestamp specified: {}'
-                      .format(timestamp_argument))
+    traceroute_timestamp_argument = config.get('input', 'traceroute_timestamp', fallback=None)
+    if args.traceroute_timestamp is not None:
+        logging.info('Overriding config traceroute timestamp.')
+        traceroute_timestamp_argument = args.traceroute_timestamp
+    traceroute_timestamp = parse_timestamp_argument(traceroute_timestamp_argument)
+    if traceroute_timestamp == 0:
+        logging.error('Invalid traceroute timestamp specified: {}'
+                      .format(traceroute_timestamp_argument))
+        exit(1)
+    bgp_timestamp_argument = config.get('input', 'bgp_timestamp', fallback=None)
+    if args.bgp_timestamp is not None:
+        logging.info('Overriding config BGP timestamp.')
+        bgp_timestamp_argument = args.bgp_timestamp
+    bgp_timestamp = parse_timestamp_argument(bgp_timestamp_argument)
+    if bgp_timestamp == 0:
+        logging.error('Invalid BGP timestamp specified: {}'
+                      .format(bgp_timestamp_argument))
         exit(1)
     logging.info('Timestamp: {} {}'
-                 .format(datetime.utcfromtimestamp(timestamp)
-                         .strftime('%Y-%m-%dT%H:%M'), timestamp))
+                 .format(datetime.utcfromtimestamp(traceroute_timestamp)
+                         .strftime('%Y-%m-%dT%H:%M'), traceroute_timestamp))
     bgp_kafka_topic = config.get('input', 'bgp_kafka_topic',
                                  fallback='ihr_hegemony')
     traceroute_kafka_topic = config.get('input', 'traceroute_kafka_topic',
@@ -194,14 +207,15 @@ if __name__ == '__main__':
         scope_as_filter = None
     if scope_as_filter is not None:
         scope_as_filter = set(scope_as_filter.split(','))
-    bgp_scopes = read_scopes(bgp_kafka_topic,
-                             timestamp * 1000,
-                             bootstrap_servers,
-                             scope_as_filter)
-    traceroute_scopes = read_scopes(traceroute_kafka_topic,
-                                    timestamp * 1000,
+        logging.info('Filtering for AS scopes: {}'.format(scope_as_filter))
+    bgp_scopes = read_legacy_scopes(bgp_kafka_topic,
+                                    bgp_timestamp * 1000,
                                     bootstrap_servers,
                                     scope_as_filter)
+    traceroute_scopes = read_legacy_scopes(traceroute_kafka_topic,
+                                           traceroute_timestamp * 1000,
+                                           bootstrap_servers,
+                                           scope_as_filter)
     if not bgp_scopes or not traceroute_scopes:
         logging.error('No results for BGP ({} entries) or traceroute ({} '
                       'entries).'.format(len(bgp_scopes),
@@ -243,7 +257,7 @@ if __name__ == '__main__':
     output_dir = config.get('output', 'directory', fallback='./')
     if not output_dir.endswith('/'):
         output_dir += '/'
-    out_date = datetime.utcfromtimestamp(timestamp).strftime('%Y-%m-%dT%H:%M')
+    out_date = datetime.utcfromtimestamp(traceroute_timestamp).strftime('%Y-%m-%dT%H:%M')
     output_dir += out_date + '/'
     os.makedirs(output_dir, exist_ok=True)
 
@@ -251,6 +265,7 @@ if __name__ == '__main__':
     write_raw_data(raw_data_overlap, output_dir + 'overlap-raw.dat')
     write_data(plot_data_union, output_dir + 'union.dat')
     write_raw_data(raw_data_union, output_dir + 'union-raw.dat')
+    write_raw_data(raw_scores, output_dir + 'raw.dat')
 
     plot_scopes(plot_data_overlap, 'max', 'avg', output_dir + 'overlap_max_avg.pdf', out_date)
     plot_scopes(plot_data_overlap, 'max', 'median', output_dir + 'overlap_max_median.pdf', out_date)
