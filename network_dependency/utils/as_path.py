@@ -71,6 +71,7 @@ class ASPath:
         # later, since we might want to ignore paths where we dropped
         # the majority of hops.
         unknown_hops = 0
+        as_set_counted = False
         for idx, (as_, ip) in enumerate(self.nodes):
             # TODO Check this
             if isinstance(as_, tuple):
@@ -91,8 +92,9 @@ class ASPath:
                 if len(filtered_as_set) >= 1 and idx in self.ixp_nodes:
                     self.reduced_ixp_nodes.append(len(as_path))
                 if len(filtered_as_set) > 1:
-                    if stats:
+                    if stats and not as_set_counted:
                         stats['as_set'] += 1
+                        as_set_counted = True
                     # Still a set, add as such.
                     as_path.append(tuple(filtered_as_set))
                     ip_path.append(tuple(filtered_ip_set))
