@@ -1,0 +1,197 @@
+import argparse
+import bz2
+import configparser
+import logging
+import pickle
+import sys
+from collections import namedtuple
+from datetime import datetime, timezone
+
+from confluent_kafka.admin import AdminClient, NewTopic, KafkaException
+
+from randomized_hegemony.utils.topic_filler import Mode, TopicFiller
+from randomized_hegemony.utils.topic_reader import TopicReader
+
+sys.path.insert(0, '../')
+from network_dependency.utils.helper_functions import parse_timestamp_argument
+
+DATE_FMT = '%Y-%m-%dT%H:%M'
+ListPair = namedtuple('ListPair', 'success fail')
+
+
+def verify_config(config_path: str) -> configparser.ConfigParser:
+    config = configparser.ConfigParser(
+        converters={'csv': lambda entry: entry.split(',')})
+    if not config.read(config_path):
+        logging.error('Failed to read configuration file.')
+        return config
+    try:
+        config.get('input', 'collector')
+        config.getcsv('input', 'scopes')
+    except ValueError as e:
+        logging.error(f'Invalid configuration value specified: {e}')
+        return configparser.ConfigParser()
+    except configparser.NoOptionError as e:
+        logging.error(f'Missing configuration value: {e}')
+        return configparser.ConfigParser()
+    return config
+
+
+def verify_topic_configs(topics: list, admin_client: AdminClient) -> ListPair:
+    success = list()
+    fail = list()
+    result = admin_client.create_topics(topics, validate_only=True)
+    for topic in result:
+        try:
+            result[topic].result()
+        except KafkaException as e:
+            logging.error(f'Topic validation failed for topic {topic}: {e}')
+            fail.append(topic)
+            continue
+        success.append(topic)
+    return ListPair(success, fail)
+
+
+def create_topics(topics: list, admin_client: AdminClient) -> ListPair:
+    success = list()
+    fail = list()
+    result = admin_client.create_topics(topics)
+    for topic in result:
+        try:
+            result[topic].result()
+        except KafkaException as e:
+            logging.error(f'Topic creation failed for topic {topic}: {e}')
+            fail.append(topic)
+            continue
+        success.append(topic)
+    return ListPair(success, fail)
+
+
+def delete_topics(topics: list, admin_client: AdminClient) -> ListPair:
+    success = list()
+    fail = list()
+    result = admin_client.delete_topics(topics)
+    for topic in result:
+        try:
+            result[topic].result()
+        except KafkaException as e:
+            logging.error(f'Topic deletion failed for topic {topic}: {e}')
+            fail.append(topic)
+            continue
+        success.append(topic)
+    return ListPair(success, fail)
+
+
+def generate_topics(collector_prefix: str, count: int, bootstrap_server: str):
+    admin_client = AdminClient({'bootstrap.servers': bootstrap_server})
+    collectors = list()
+    prepared_topics = list()
+    for i in range(count):
+        collector = collector_prefix + '_' + str(i)
+        collectors.append(collector)
+        topic_prefix = 'ihr_bgp_' + collector
+        rib_topic_name = topic_prefix + '_ribs'
+        updates_topic_name = topic_prefix + '_updates'
+        rib_topic = NewTopic(rib_topic_name, num_partitions=1,
+                             replication_factor=1)
+        updates_topic = NewTopic(updates_topic_name, num_partitions=1,
+                                 replication_factor=1)
+        prepared_topics.append(rib_topic)
+        prepared_topics.append(updates_topic)
+    verify_topic_result = verify_topic_configs(prepared_topics, admin_client)
+    if verify_topic_result.fail:
+        logging.error(f'Error during topic validation.')
+        return list()
+    create_topic_result = create_topics(prepared_topics, admin_client)
+    if create_topic_result.fail:
+        logging.error(f'Error during topic creation. Rolling back.')
+        delete_topic_result = delete_topics(create_topic_result.success,
+                                            admin_client)
+        if delete_topic_result.fail:
+            logging.critical(f'Rollback failed! Check for topic leftovers.')
+            return list()
+        logging.error(f'Rollback succeeded.')
+        return list()
+    return collectors
+
+
+def main() -> None:
+    log_fmt = '%(asctime)s %(levelname)s %(message)s'
+    logging.basicConfig(
+        format=log_fmt,
+        level=logging.INFO,
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument('config')
+    parser.add_argument('timestamp')
+    parser.add_argument('sampling_percentage', type=int)
+    parser.add_argument('iterations', type=int)
+    mode_group = parser.add_mutually_exclusive_group(required=True)
+    mode_group.add_argument('-a', '--asn', action='store_true')
+    mode_group.add_argument('-p', '--peer', action='store_true')
+    parser.add_argument('-s', '--server', default='localhost:9092')
+    parser.add_argument('-o', '--output', default='./')
+
+    args = parser.parse_args()
+
+    logging.info(f'Started: {sys.argv}')
+
+    output_dir = args.output
+    if not output_dir.endswith('/'):
+        output_dir += '/'
+
+    config = verify_config(args.config)
+    if not config.sections():
+        sys.exit(1)
+
+    timestamp = parse_timestamp_argument(args.timestamp)
+    if timestamp == 0:
+        logging.error(f'Invalid timestamp specified: {args.timestamp}')
+        sys.exit(1)
+
+    collector = config.get('input', 'collector')
+
+    input_topic = 'ihr_bgp_' + collector + '_ribs'
+    reader = TopicReader(input_topic,
+                         timestamp * 1000,
+                         set(config.getcsv('input', 'scopes')),
+                         'localhost:9092')
+    reader.read()
+    logging.info('Scope stats:')
+    for scope in reader.scope_asn_messages:
+        logging.info(f'{scope}: AS: {len(reader.scope_asn_messages[scope])} '
+                     f'peers: {len(reader.scope_peer_messages[scope])}')
+
+    output_topics = generate_topics(collector + '_' +
+                                    str(args.sampling_percentage),
+                                    args.iterations, args.server)
+    if not output_topics:
+        sys.exit(1)
+
+    filler = TopicFiller(output_topics, reader, timestamp * 1000, args.server)
+    if args.asn:
+        filler.fill_topics(args.sampling_percentage, Mode.ASN)
+        mode = 'asn'
+    else:
+        filler.fill_topics(args.sampling_percentage, Mode.PEER)
+        mode = 'peer'
+
+    timestamp_str = datetime.fromtimestamp(timestamp, tz=timezone.utc) \
+        .strftime(DATE_FMT)
+    sample_stat_file = output_dir + '.'.join(['samples', mode, collector,
+                                              timestamp_str, 'pickle.bz2'])
+    logging.info(f'Writing sample stats to {sample_stat_file}')
+    with bz2.open(sample_stat_file, 'wb') as f:
+        pickle.dump(filler.sampled_data, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+    collector_stat_file = output_dir + '.'.join([collector, 'collectors',
+                                                 'csv'])
+    logging.info(f'Writing intermediate collectors to {collector_stat_file}')
+    with open(collector_stat_file, 'w') as f:
+        f.write('\n'.join(output_topics) + '\n')
+
+
+if __name__ == '__main__':
+    main()
+    sys.exit(0)
