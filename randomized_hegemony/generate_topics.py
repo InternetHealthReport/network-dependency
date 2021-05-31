@@ -9,8 +9,8 @@ from datetime import datetime, timezone
 
 from confluent_kafka.admin import AdminClient, NewTopic, KafkaException
 
-from randomized_hegemony.utils.topic_filler import Mode, TopicFiller
-from randomized_hegemony.utils.topic_reader import TopicReader
+from utils.topic_filler import PopulationMode, SamplingMode, TopicFiller
+from utils.topic_reader import TopicReader
 
 sys.path.insert(0, '../')
 from network_dependency.utils.helper_functions import parse_timestamp_argument
@@ -125,11 +125,16 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('config')
     parser.add_argument('timestamp')
-    parser.add_argument('sampling_percentage', type=int)
     parser.add_argument('iterations', type=int)
-    mode_group = parser.add_mutually_exclusive_group(required=True)
-    mode_group.add_argument('-a', '--asn', action='store_true')
-    mode_group.add_argument('-p', '--peer', action='store_true')
+    sampling_mode_group = parser.add_mutually_exclusive_group(required=True)
+    sampling_mode_group.add_argument('-sr', '--relative', type=int,
+                                     help='sampling value as a percentage')
+    sampling_mode_group.add_argument('-sa', '--absolute', type=int,
+                                     help='sampling value as an absolute '
+                                          'number')
+    population_mode_group = parser.add_mutually_exclusive_group(required=True)
+    population_mode_group.add_argument('-a', '--asn', action='store_true')
+    population_mode_group.add_argument('-p', '--peer', action='store_true')
     parser.add_argument('-s', '--server', default='localhost:9092')
     parser.add_argument('-o', '--output', default='./')
 
@@ -163,23 +168,35 @@ def main() -> None:
         logging.info(f'{scope}: AS: {len(reader.scope_asn_messages[scope])} '
                      f'peers: {len(reader.scope_peer_messages[scope])}')
 
+    if args.relative:
+        sampling_mode = SamplingMode.RELATIVE
+        sampling_mode_str = 'relative'
+        sampling_value = args.relative
+    else:
+        sampling_mode = SamplingMode.ABSOLUTE
+        sampling_mode_str = 'absolute'
+        sampling_value = args.absolute
+
+    if args.asn:
+        population_mode = PopulationMode.ASN
+        population_mode_str = 'asn'
+    else:
+        population_mode = PopulationMode.PEER
+        population_mode_str = 'peer'
+
     output_topics = generate_topics(collector + '_' +
-                                    str(args.sampling_percentage),
+                                    str(sampling_value),
                                     args.iterations, args.server)
     if not output_topics:
         sys.exit(1)
 
     filler = TopicFiller(output_topics, reader, timestamp * 1000, args.server)
-    if args.asn:
-        filler.fill_topics(args.sampling_percentage, Mode.ASN)
-        mode = 'asn'
-    else:
-        filler.fill_topics(args.sampling_percentage, Mode.PEER)
-        mode = 'peer'
+    filler.fill_topics(sampling_value, sampling_mode, population_mode)
 
     timestamp_str = datetime.fromtimestamp(timestamp, tz=timezone.utc) \
         .strftime(DATE_FMT)
-    sample_stat_file = output_dir + '.'.join(['samples', mode, collector,
+    sample_stat_file = output_dir + '.'.join(['samples', sampling_mode_str,
+                                              population_mode_str, collector,
                                               timestamp_str, 'pickle.bz2'])
     logging.info(f'Writing sample stats to {sample_stat_file}')
     with bz2.open(sample_stat_file, 'wb') as f:

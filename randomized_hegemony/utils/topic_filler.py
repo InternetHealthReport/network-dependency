@@ -4,11 +4,15 @@ from enum import Enum
 
 import msgpack
 from confluent_kafka import Message, Producer
+from utils.topic_reader import TopicReader, MessageStruct
 
-from topic_reader import TopicReader, MessageStruct
+
+class SamplingMode(Enum):
+    ABSOLUTE = 1
+    RELATIVE = 2
 
 
-class Mode(Enum):
+class PopulationMode(Enum):
     ASN = 1
     PEER = 2
 
@@ -28,12 +32,17 @@ class TopicFiller:
         self.sampled_data = dict()
 
     @staticmethod
-    def __sample(data: dict, percentage: int) -> dict:
+    def __sample(data: dict, sampling_value: int, mode: SamplingMode) -> dict:
         ret = dict()
         for scope in data:
             population = data[scope]
             population_size = len(population)
-            sample_size = int(population_size / 100 * percentage)
+            if mode == SamplingMode.RELATIVE:
+                sample_size = int(population_size / 100 * sampling_value)
+            else:
+                sample_size = sampling_value
+            if sample_size > population_size:
+                continue
             sampled_keys = random.sample(population.keys(), sample_size)
             ret[scope] = {k: v for k, v in population.items()
                           if k in sampled_keys}
@@ -113,10 +122,17 @@ class TopicFiller:
                              on_delivery=self.__delivery_report)
         producer.flush(self.TIMEOUT_IN_S)
 
-    def fill_topics(self, sampling_percentage: int, mode: Mode):
-        logging.info(f'Creating {len(self.collectors)} samples with size '
-                     f'{sampling_percentage}%')
-        if mode == Mode.ASN:
+    def fill_topics(self,
+                    sampling_value: int,
+                    sampling_mode: SamplingMode,
+                    population_mode: PopulationMode):
+        if sampling_mode == SamplingMode.RELATIVE:
+            logging.info(f'Creating {len(self.collectors)} samples with size '
+                         f'{sampling_value}%')
+        else:
+            logging.info(f'Creating {len(self.collectors)} samples with size '
+                         f'{sampling_value}')
+        if population_mode == PopulationMode.ASN:
             logging.info('Mode: ASN')
             population_data = self.reader.scope_asn_messages
         else:
@@ -125,7 +141,8 @@ class TopicFiller:
         sampled_data = list()
         for _ in range(len(self.collectors)):
             sampled_data.append(self.__sample(population_data,
-                                              sampling_percentage))
+                                              sampling_value,
+                                              sampling_mode))
         producer = Producer({'bootstrap.servers': self.bootstrap_server,
                              'compression.codec': 'lz4',
                              'delivery.report.only.error': True,
