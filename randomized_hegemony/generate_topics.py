@@ -156,6 +156,28 @@ def main() -> None:
         logging.error(f'Invalid timestamp specified: {args.timestamp}')
         sys.exit(1)
 
+    if args.relative:
+        sampling_mode = SamplingMode.RELATIVE
+        sampling_mode_str = 'relative'
+        sampling_value = args.relative
+        if 1 > sampling_value > 100:
+            logging.error('Relative sampling value needs to be in range [1-100]')
+            sys.exit(1)
+    else:
+        sampling_mode = SamplingMode.ABSOLUTE
+        sampling_mode_str = 'absolute'
+        sampling_value = args.absolute
+        if sampling_value < 1:
+            logging.error('Absolute sampling value needs to be at least 1')
+            sys.exit(1)
+
+    if args.asn:
+        population_mode = PopulationMode.ASN
+        population_mode_str = 'asn'
+    else:
+        population_mode = PopulationMode.PEER
+        population_mode_str = 'peer'
+
     collector = config.get('input', 'collector')
 
     input_topic = 'ihr_bgp_' + collector + '_ribs'
@@ -168,22 +190,6 @@ def main() -> None:
     for scope in reader.scope_asn_messages:
         logging.info(f'{scope}: AS: {len(reader.scope_asn_messages[scope])} '
                      f'peers: {len(reader.scope_peer_messages[scope])}')
-
-    if args.relative:
-        sampling_mode = SamplingMode.RELATIVE
-        sampling_mode_str = 'relative'
-        sampling_value = args.relative
-    else:
-        sampling_mode = SamplingMode.ABSOLUTE
-        sampling_mode_str = 'absolute'
-        sampling_value = args.absolute
-
-    if args.asn:
-        population_mode = PopulationMode.ASN
-        population_mode_str = 'asn'
-    else:
-        population_mode = PopulationMode.PEER
-        population_mode_str = 'peer'
 
     output_topics = generate_topics(collector + '_' +
                                     str(sampling_value),
