@@ -16,6 +16,7 @@ sys.path.insert(0, '../')
 from network_dependency.utils.helper_functions import parse_timestamp_argument
 
 DATE_FMT = '%Y-%m-%dT%H:%M'
+TOPIC_CONFIG = {'retention.ms': 2592000000}
 ListPair = namedtuple('ListPair', 'success fail')
 
 
@@ -93,9 +94,9 @@ def generate_topics(collector_prefix: str, count: int, bootstrap_server: str):
         rib_topic_name = topic_prefix + '_ribs'
         updates_topic_name = topic_prefix + '_updates'
         rib_topic = NewTopic(rib_topic_name, num_partitions=1,
-                             replication_factor=1)
+                             replication_factor=1, config=TOPIC_CONFIG)
         updates_topic = NewTopic(updates_topic_name, num_partitions=1,
-                                 replication_factor=1)
+                                 replication_factor=1, config=TOPIC_CONFIG)
         prepared_topics.append(rib_topic)
         prepared_topics.append(updates_topic)
     verify_topic_result = verify_topic_configs(prepared_topics, admin_client)
