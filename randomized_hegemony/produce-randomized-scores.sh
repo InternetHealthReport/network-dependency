@@ -1,8 +1,8 @@
 #!/bin/bash
 set -euo pipefail
-if [ ! $# -eq 5 ]
+if [ ! $# -eq 6 ]
 then
-    echo "usage: $0 config timestamp sampling_percentage iterations (-a | -p)"
+    echo "usage: $0 config timestamp (-sa | -sr) sampling_value iterations (-a | -p)"
     exit 1
 fi
 AS_HEGEMONY=
@@ -13,9 +13,10 @@ QUEUE="${WORKING_DIR}/queue.parallel"
 
 CONFIG="${1}"
 TIMESTAMP="${2}"
-SAMPLING_PERCENTAGE="${3}"
-ITERATIONS="${4}"
-MODE="${5}"
+SAMPLING_MODE="${3}"
+SAMPLING_VALUE="${4}"
+ITERATIONS="${5}"
+POPULATION_MODE="${6}"
 
 # Hack to get the collector name from the config. xargs is used to trim possible whitespace...
 COLLECTOR_LIST=$(grep -e "collector.*=.*" "${CONFIG}" | cut -d'=' -f 2 | xargs).collectors.csv
@@ -26,7 +27,7 @@ STOP_TS2=$(date --utc +%Y-%m-%dT%H:%M:02 --date="${TIMESTAMP}")
 
 mkdir -p "${WORKING_DIR}"
 
-python3 generate_topics.py "${CONFIG}" "${TIMESTAMP}" "${SAMPLING_PERCENTAGE}" "${ITERATIONS}" "${MODE}" -o "${WORKING_DIR}"
+python3 generate_topics.py "${CONFIG}" "${TIMESTAMP}" "${ITERATIONS}" "${SAMPLING_MODE}" "${SAMPLING_VALUE}" "${POPULATION_MODE}" -o "${WORKING_DIR}"
 
 [ -f "${QUEUE}" ] && rm "${QUEUE}"
 while read -r COLLECTOR
