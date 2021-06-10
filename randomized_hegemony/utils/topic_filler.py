@@ -24,12 +24,14 @@ class TopicFiller:
                  collectors: list,
                  reader: TopicReader,
                  timestamp: int,
-                 bootstrap_server: str):
+                 bootstrap_server: str,
+                 force_timestamp: bool = False):
         self.collectors = collectors
         self.reader = reader
         self.timestamp = timestamp
         self.bootstrap_server = bootstrap_server
         self.sampled_data = dict()
+        self.force_ts = force_timestamp
 
     @staticmethod
     def __sample(data: dict, sampling_value: int, mode: SamplingMode) -> dict:
@@ -73,11 +75,15 @@ class TopicFiller:
                         entity_dict[entity]['peer_addresses'][peer_address] = 0
                     entity_dict[entity]['peer_addresses'][peer_address] += 1
                     msg: Message = msg_struct.msg
+                    if self.force_ts:
+                        produce_ts = self.timestamp
+                    else:
+                        produce_ts = msg.timestamp()[1]
                     try:
                         producer.produce(rib_topic,
                                          key=msg.key(),
                                          value=msg.value(),
-                                         timestamp=msg.timestamp()[1],
+                                         timestamp=produce_ts,
                                          on_delivery=self.__delivery_report)
                     except BufferError:
                         logging.warning('Buffer error. Flushing queue...')
@@ -86,7 +92,7 @@ class TopicFiller:
                         producer.produce(rib_topic,
                                          key=msg.key(),
                                          value=msg.value(),
-                                         timestamp=msg.timestamp()[1],
+                                         timestamp=produce_ts,
                                          on_delivery=self.__delivery_report)
                     producer.poll(0)
             scope_dict[scope] = entity_dict
@@ -122,10 +128,10 @@ class TopicFiller:
                              on_delivery=self.__delivery_report)
         producer.flush(self.TIMEOUT_IN_S)
 
-    def fill_topics(self,
-                    sampling_value: int,
-                    sampling_mode: SamplingMode,
-                    population_mode: PopulationMode):
+    def fill_topics_sampling(self,
+                             sampling_value: int,
+                             sampling_mode: SamplingMode,
+                             population_mode: PopulationMode):
         if sampling_mode == SamplingMode.RELATIVE:
             logging.info(f'Creating {len(self.collectors)} samples with size '
                          f'{sampling_value}%')
@@ -154,5 +160,26 @@ class TopicFiller:
         try:
             for idx, collector in enumerate(self.collectors):
                 self.__fill_topic(collector, sampled_data[idx], producer)
+        finally:
+            producer.flush(self.TIMEOUT_IN_S)
+
+    def fill_topics_direct(self, population_mode: PopulationMode):
+        if population_mode == PopulationMode.ASN:
+            logging.info('Mode: ASN')
+            population_data = self.reader.scope_asn_messages
+        else:
+            logging.info('Mode: Peers')
+            population_data = self.reader.scope_peer_messages
+        producer = Producer({'bootstrap.servers': self.bootstrap_server,
+                             'compression.codec': 'lz4',
+                             'delivery.report.only.error': True,
+                             'queue.buffering.max.messages': 10000000,
+                             'queue.buffering.max.kbytes': 4194304,  # 4 GiB
+                             'queue.buffering.max.ms': 1000,
+                             'batch.num.messages': 1000000
+                             })
+        try:
+            for collector in self.collectors:
+                self.__fill_topic(collector, population_data, producer)
         finally:
             producer.flush(self.TIMEOUT_IN_S)

@@ -4,20 +4,16 @@ import configparser
 import logging
 import pickle
 import sys
-from collections import namedtuple
 from datetime import datetime, timezone
 
-from confluent_kafka.admin import AdminClient, NewTopic, KafkaException
-
+from utils.topic_creation import generate_topics
 from utils.topic_filler import PopulationMode, SamplingMode, TopicFiller
-from utils.topic_reader import TopicReader
+from utils.topic_reader import ReadMode, TopicReader
 
 sys.path.insert(0, '../')
 from network_dependency.utils.helper_functions import parse_timestamp_argument
 
 DATE_FMT = '%Y-%m-%dT%H:%M'
-TOPIC_CONFIG = {'retention.ms': 2592000000}
-ListPair = namedtuple('ListPair', 'success fail')
 
 
 def verify_config(config_path: str) -> configparser.ConfigParser:
@@ -36,84 +32,6 @@ def verify_config(config_path: str) -> configparser.ConfigParser:
         logging.error(f'Missing configuration value: {e}')
         return configparser.ConfigParser()
     return config
-
-
-def verify_topic_configs(topics: list, admin_client: AdminClient) -> ListPair:
-    success = list()
-    fail = list()
-    result = admin_client.create_topics(topics, validate_only=True)
-    for topic in result:
-        try:
-            result[topic].result()
-        except KafkaException as e:
-            logging.error(f'Topic validation failed for topic {topic}: {e}')
-            fail.append(topic)
-            continue
-        success.append(topic)
-    return ListPair(success, fail)
-
-
-def create_topics(topics: list, admin_client: AdminClient) -> ListPair:
-    success = list()
-    fail = list()
-    result = admin_client.create_topics(topics)
-    for topic in result:
-        try:
-            result[topic].result()
-        except KafkaException as e:
-            logging.error(f'Topic creation failed for topic {topic}: {e}')
-            fail.append(topic)
-            continue
-        success.append(topic)
-    return ListPair(success, fail)
-
-
-def delete_topics(topics: list, admin_client: AdminClient) -> ListPair:
-    success = list()
-    fail = list()
-    result = admin_client.delete_topics(topics)
-    for topic in result:
-        try:
-            result[topic].result()
-        except KafkaException as e:
-            logging.error(f'Topic deletion failed for topic {topic}: {e}')
-            fail.append(topic)
-            continue
-        success.append(topic)
-    return ListPair(success, fail)
-
-
-def generate_topics(collector_prefix: str, count: int, bootstrap_server: str):
-    admin_client = AdminClient({'bootstrap.servers': bootstrap_server})
-    collectors = list()
-    prepared_topics = list()
-    for i in range(count):
-        collector = collector_prefix + '_' + str(i)
-        collectors.append(collector)
-        topic_prefix = 'ihr_bgp_' + collector
-        rib_topic_name = topic_prefix + '_ribs'
-        updates_topic_name = topic_prefix + '_updates'
-        rib_topic = NewTopic(rib_topic_name, num_partitions=1,
-                             replication_factor=1, config=TOPIC_CONFIG)
-        updates_topic = NewTopic(updates_topic_name, num_partitions=1,
-                                 replication_factor=1, config=TOPIC_CONFIG)
-        prepared_topics.append(rib_topic)
-        prepared_topics.append(updates_topic)
-    verify_topic_result = verify_topic_configs(prepared_topics, admin_client)
-    if verify_topic_result.fail:
-        logging.error(f'Error during topic validation.')
-        return list()
-    create_topic_result = create_topics(prepared_topics, admin_client)
-    if create_topic_result.fail:
-        logging.error(f'Error during topic creation. Rolling back.')
-        delete_topic_result = delete_topics(create_topic_result.success,
-                                            admin_client)
-        if delete_topic_result.fail:
-            logging.critical(f'Rollback failed! Check for topic leftovers.')
-            return list()
-        logging.error(f'Rollback succeeded.')
-        return list()
-    return collectors
 
 
 def main() -> None:
@@ -161,7 +79,8 @@ def main() -> None:
         sampling_mode_str = 'relative'
         sampling_value = args.relative
         if 1 > sampling_value > 100:
-            logging.error('Relative sampling value needs to be in range [1-100]')
+            logging.error('Relative sampling value needs to be in range '
+                          '[1-100]')
             sys.exit(1)
     else:
         sampling_mode = SamplingMode.ABSOLUTE
@@ -184,7 +103,8 @@ def main() -> None:
     reader = TopicReader(input_topic,
                          timestamp * 1000,
                          set(config.getcsv('input', 'scopes')),
-                         'localhost:9092')
+                         args.server,
+                         ReadMode.EXACT_TS)
     reader.read()
     logging.info('Scope stats:')
     for scope in reader.scope_asn_messages:
@@ -198,7 +118,7 @@ def main() -> None:
         sys.exit(1)
 
     filler = TopicFiller(output_topics, reader, timestamp * 1000, args.server)
-    filler.fill_topics(sampling_value, sampling_mode, population_mode)
+    filler.fill_topics_sampling(sampling_value, sampling_mode, population_mode)
 
     timestamp_str = datetime.fromtimestamp(timestamp, tz=timezone.utc) \
         .strftime(DATE_FMT)
