@@ -168,6 +168,8 @@ class TopicReader:
                 if self.read_mode == ReadMode.EXACT_TS \
                         and ts[1] != self.start_ts:
                     continue
+                if ts[1] < self.start_ts:
+                    continue
                 if self.end_ts != OFFSET_END and ts[1] >= self.end_ts:
                     continue
                 self.__process_msg(msg)
