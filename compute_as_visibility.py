@@ -35,7 +35,7 @@ def verify_option(config: configparser.ConfigParser,
 def verify_config(config_path: str) -> configparser.ConfigParser:
     config = configparser.ConfigParser()
     config.read(config_path)
-    check_options = [('input', 'kafka_topic'),
+    check_options = [('input', 'collector'),
                      ('output', 'kafka_topic'),
                      ('kafka', 'bootstrap_servers')]
     for option in check_options:
@@ -46,7 +46,7 @@ def verify_config(config_path: str) -> configparser.ConfigParser:
 
 def check_key(key, data: dict) -> bool:
     if key not in data or not data[key]:
-        logging.error(f'Key {key} missing in message.')
+        logging.debug(f'Key {key} missing in message.')
         return True
     return False
 
@@ -77,8 +77,11 @@ def process_msg(msg: dict, data: dict) -> int:
     elements = msg['elements']
     as_paths_in_msg = 0
     for element in elements:
-        if check_key('fields', element) \
+        if check_key('type', element) \
+                or check_key('fields', element) \
                 or check_key('as-path', element['fields']):
+            continue
+        if element['type'] not in {'R', 'A', 'W'}:
             continue
         as_path = element['fields']['as-path'].split(' ')
         for hop in range(len(as_path)):
@@ -102,18 +105,23 @@ def process_msg(msg: dict, data: dict) -> int:
 
 
 def flush_data(data: dict,
-               as_paths_in_bin: int,
-               timestamp: int,
+               total_as_paths: int,
+               start_output_ts: int,
+               end_output_ts: int,
                writer: KafkaWriter):
-    ts_str = datetime.fromtimestamp(timestamp, tz=timezone.utc) \
+    start_ts_str = datetime.fromtimestamp(start_output_ts, tz=timezone.utc) \
         .strftime(DATE_FMT)
-    logging.info(f'Flushing bin {ts_str}: {len(data)} ASes.')
-    msg = {'timestamp': timestamp,
-           'total_as_paths': as_paths_in_bin}
+    end_ts_str = datetime.fromtimestamp(end_output_ts, tz=timezone.utc) \
+        .strftime(DATE_FMT)
+    logging.info(f'Flushing range {start_ts_str} - {end_ts_str}: {len(data)} '
+                 f'ASes.')
+    msg = {'start_timestamp': start_output_ts,
+           'end_timestamp': end_output_ts,
+           'total_as_paths': total_as_paths}
     for asn in data:
         msg['asn'] = asn
         msg.update(data[asn])
-        writer.write(asn, msg, timestamp * 1000)
+        writer.write(asn, msg, end_output_ts * 1000)
 
 
 def make_data_dict() -> dict:
@@ -122,16 +130,30 @@ def make_data_dict() -> dict:
             'rneighbors': defaultdict(int)}
 
 
-def process_interval(reader: KafkaReader, writer: KafkaWriter) -> None:
-    bins = defaultdict(lambda: defaultdict(make_data_dict))
-    as_paths_in_bins = defaultdict(int)
+def process_interval(start_output_ts: int,
+                     end_output_ts: int,
+                     reader: KafkaReader,
+                     writer: KafkaWriter) -> None:
+    data = defaultdict(make_data_dict)
+    total_as_paths = 0
+    smallest_ts = None
+    largest_ts = None
     for msg in reader.read():
         if check_key('rec', msg) or check_key('time', msg['rec']):
             continue
-        msg_ts = msg['rec']['time']
-        as_paths_in_bins[msg_ts] += process_msg(msg, bins[msg_ts])
-    for ts in sorted(bins.keys()):
-        flush_data(bins[ts], as_paths_in_bins[ts], ts, writer)
+        msg_ts = int(msg['rec']['time'])
+        if not smallest_ts or msg_ts < smallest_ts:
+            smallest_ts = msg_ts
+        if not largest_ts or msg_ts > largest_ts:
+            largest_ts = msg_ts
+        total_as_paths += process_msg(msg, data)
+    if start_output_ts == OFFSET_BEGINNING:
+        # Neither args.start nor args.start_output were specified, so use the
+        # detected timestamp, converted to milliseconds.
+        start_output_ts = smallest_ts
+    if end_output_ts == OFFSET_END:
+        end_output_ts = largest_ts
+    flush_data(data, total_as_paths, start_output_ts, end_output_ts, writer)
 
 
 def main() -> None:
@@ -142,14 +164,26 @@ def main() -> None:
         filename='compute_as_visibility.log',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
-    parser = argparse.ArgumentParser()
+    desc = """Compute the AS visibility based on AS paths visible at a
+           collector. Counts the occurrences of each AS number in the AS paths
+           of the specified range. The --start and --stop parameters are used to
+           specify the actual range that is read, whereas --start-output and
+           --end-output can be used to override the timestamps that are written
+           to the output topic."""
+    parser = argparse.ArgumentParser(description=desc)
     parser.add_argument('config')
     parser.add_argument('-s', '--start', help='Start timestamp (as UNIX epoch '
-                                              'in seconds or milliseconds, or'
+                                              'in seconds or milliseconds, or '
                                               'in YYYY-MM-DDThh:mm format)')
     parser.add_argument('-e', '--stop', help='Stop timestamp (as UNIX epoch '
-                                             'in seconds or milliseconds, or'
+                                             'in seconds or milliseconds, or '
                                              'in YYYY-MM-DDThh:mm format)')
+    parser.add_argument('-so', '--start-output',
+                        help='Start output timestamp (as UNIX epoch in seconds '
+                             'or milliseconds, or in YYYY-MM-DDThh:mm format)')
+    parser.add_argument('-eo', '--end-output',
+                        help='End output timestamp (as UNIX epoch in seconds '
+                             'or milliseconds, or in YYYY-MM-DDThh:mm format)')
     args = parser.parse_args()
 
     logging.info(f'Started: {sys.argv}')
@@ -158,28 +192,47 @@ def main() -> None:
     if not config.sections():
         sys.exit(1)
 
-    start = OFFSET_BEGINNING
+    start_ts = OFFSET_BEGINNING
+    start_output_ts = start_ts
     if args.start:
-        start = parse_timestamp_argument(args.start) * 1000
-        if start == 0:
+        start_ts = parse_timestamp_argument(args.start) * 1000
+        start_output_ts = start_ts // 1000
+        if start_ts == 0:
             logging.error(f'Invalid start timestamp: {args.start}')
             sys.exit(1)
-    end = OFFSET_END
+    end_ts = OFFSET_END
+    end_output_ts = end_ts
     if args.stop:
-        end = parse_timestamp_argument(args.stop) * 1000
-        if end == 0:
-            logging.error(f'Invalid stop timestamp: {args.stop}')
+        end_ts = parse_timestamp_argument(args.stop) * 1000
+        end_output_ts = end_ts // 1000
+        if end_ts == 0:
+            logging.error(f'invalid stop timestamp: {args.stop}')
             sys.exit(1)
+    if args.end_output:
+        end_output_ts = parse_timestamp_argument(args.end_output)
+        if end_output_ts == 0:
+            logging.error(f'invalid output timestamp: {args.end_output}')
+            sys.exit(1)
+    if args.start_output:
+        start_output_ts = parse_timestamp_argument(args.start_output)
+        if start_output_ts == 0:
+            logging.error(f'invalid output timestamp: {args.start_output}')
+            sys.exit(1)
+    logging.info(f'Timestamps: start: {start_ts} start_output: '
+                 f'{start_output_ts} end: {end_ts} end_output: {end_output_ts}')
 
-    reader = KafkaReader([config.get('input', 'kafka_topic')],
+    rib_topic = 'ihr_bgp_' + config.get('input', 'collector') + '_ribs'
+    update_topic = 'ihr_bgp_' + config.get('input', 'collector') + '_updates'
+
+    reader = KafkaReader([rib_topic, update_topic],
                          config.get('kafka', 'bootstrap_servers'),
-                         start,
-                         end)
+                         start_ts,
+                         end_ts)
     writer = KafkaWriter(config.get('output', 'kafka_topic'),
                          config.get('kafka', 'bootstrap_servers'))
 
     with reader, writer:
-        process_interval(reader, writer)
+        process_interval(start_output_ts, end_output_ts, reader, writer)
 
 
 if __name__ == '__main__':
