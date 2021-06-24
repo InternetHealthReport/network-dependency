@@ -54,8 +54,8 @@ def check_key(key, data: dict) -> bool:
 def parse_asn(asn: str) -> list:
     if not asn:
         return list()
-    if asn.startswith('('):
-        return list(asn.strip('()').split(','))
+    if asn.startswith('{'):
+        return list(asn.strip('{}').split(','))
     return [asn]
 
 
