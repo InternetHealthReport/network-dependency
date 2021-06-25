@@ -1,7 +1,8 @@
-import confluent_kafka
-from confluent_kafka import Consumer, TopicPartition
 import logging
+
+import confluent_kafka
 import msgpack
+from confluent_kafka import Consumer, TopicPartition
 
 
 class KafkaReader:
@@ -12,15 +13,18 @@ class KafkaReader:
     topic. In this case, the last read needs to go into a timeout in
     order to return.
     """
+    PARTITION_EOF = -191
 
     def __init__(self,
                  topic: list,
                  bootstrap_servers: str,
                  start: int = confluent_kafka.OFFSET_BEGINNING,
-                 end: int = confluent_kafka.OFFSET_END):
+                 end: int = confluent_kafka.OFFSET_END,
+                 read_to_end: bool = False):
         self.topics = topic
         self.start = start
         self.end = end
+        self.read_to_end = read_to_end
         self.bootstrap_servers = bootstrap_servers
         self.partition_paused = 0
         self.partition_total = 0
@@ -38,7 +42,8 @@ class KafkaReader:
             'group.id': self.topics[0] + '_reader',
             'auto.offset.reset': 'earliest',
             'max.poll.interval.ms': 1800 * 1000,
-            })
+            'enable.partition.eof': True
+        })
         self.consumer.subscribe(self.topics, on_assign=self.__on_assign)
         logging.debug('Created consumer and subscribed to topic(s) {}.'
                       .format(self.topics))
@@ -75,17 +80,27 @@ class KafkaReader:
                 logging.warning('Timeout! ({}s)'.format(self.timeout_in_s))
                 break
             if msg.error():
+                if msg.error().code() == self.PARTITION_EOF:
+                    self.consumer.pause([TopicPartition(msg.topic(),
+                                                        msg.partition())])
+                    self.partition_paused += 1
+                    if self.partition_paused < self.partition_total:
+                        continue
+                    else:
+                        break
                 logging.error("Consumer error: {}".format(msg.error()))
                 continue
             # Filter with start and end times
             # tuple of message timestamp type and timestamp
             ts = msg.timestamp()
-            if ts[0] == confluent_kafka.TIMESTAMP_CREATE_TIME \
-                    and ts[1] < self.start:
+            if ts[0] != confluent_kafka.TIMESTAMP_CREATE_TIME:
+                logging.warning(f'Unexpected timestamp type: {ts[0]}')
                 continue
-
-            if ts[0] == confluent_kafka.TIMESTAMP_CREATE_TIME \
-                    and ts[1] >= self.end != confluent_kafka.OFFSET_END:
+            if ts[1] < self.start:
+                continue
+            if ts[1] >= self.end != confluent_kafka.OFFSET_END:
+                if self.read_to_end:
+                    continue
                 # Stop reading from this partition since we have reached
                 # the end of the record range in which we are
                 # interested.
