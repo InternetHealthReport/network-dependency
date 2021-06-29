@@ -1,13 +1,24 @@
 import logging
+
+import msgpack
 from confluent_kafka import Producer
 from confluent_kafka.admin import AdminClient, NewTopic
-import msgpack
 
 
 class KafkaWriter:
-    def __init__(self, topic: str, bootstrap_servers: str):
+    def __init__(self,
+                 topic: str,
+                 bootstrap_servers: str,
+                 num_partitions: int = 2,
+                 replication_factor: int = 2,
+                 config: dict = None):
+        if config is None:
+            config = {'retention.ms': 2592000000}
         self.topic = topic
         self.bootstrap_servers = bootstrap_servers
+        self.num_partitions = num_partitions
+        self.replication_factor = replication_factor
+        self.config = config
         self.timeout_in_s = 60
 
     def __enter__(self):
@@ -35,10 +46,10 @@ class KafkaWriter:
         """
         admin_client = AdminClient({'bootstrap.servers':
                                         self.bootstrap_servers})
-        topic_list = [NewTopic(self.topic, num_partitions=2,
-                               replication_factor=2,
+        topic_list = [NewTopic(self.topic, num_partitions=self.num_partitions,
+                               replication_factor=self.replication_factor,
                                # 1 month
-                               config={'retention.ms': '2592000000'})]
+                               config=self.config)]
         created_topic = admin_client.create_topics(topic_list)
         for topic, f in created_topic.items():
             try:
