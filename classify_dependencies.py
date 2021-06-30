@@ -186,8 +186,7 @@ def main() -> None:
     bgp_reader = KafkaReader([bgp_topic],
                              config.get('kafka', 'bootstrap_servers'),
                              start_ts,
-                             end_ts,
-                             read_to_end=True)
+                             end_ts)
     logging.info(f'Reading BGP scopes from {bgp_topic}')
     with bgp_reader:
         bgp_scopes = read_scopes(bgp_reader, min_peers, min_hege)
@@ -196,8 +195,7 @@ def main() -> None:
     traceroute_reader = KafkaReader([traceroute_topic],
                                     config.get('kafka', 'bootstrap_servers'),
                                     start_ts,
-                                    end_ts,
-                                    read_to_end=True)
+                                    end_ts)
     logging.info(f'Reading traceroute scopes from {traceroute_topic}')
     with traceroute_reader:
         traceroute_scopes = read_scopes(traceroute_reader, min_peers, min_hege)
