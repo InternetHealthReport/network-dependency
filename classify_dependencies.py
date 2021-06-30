@@ -154,7 +154,7 @@ def main() -> None:
     logging.basicConfig(
         format=log_fmt,
         level=logging.INFO,
-        filename='classify_scores.log',
+        filename='classify_dependencies.log',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
