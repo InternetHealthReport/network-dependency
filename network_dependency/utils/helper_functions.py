@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from itertools import starmap, zip_longest
 
 
 def convert_date_to_epoch(s) -> int:
@@ -61,3 +62,22 @@ def parse_range_argument(arg: str) -> list:
         range_spec = tuple(map(int, arg_split))
         return [i for i in range(*range_spec)]
     return list()
+
+
+def check_key(key, dictionary: dict) -> bool:
+    """Check if the key exists in the specified dictionary with a value
+    other than None.
+
+    Return True if the key is not present or has value None."""
+    if key not in dictionary or dictionary[key] is None:
+        return True
+    return False
+
+
+def check_keys(keys: list, dictionary: dict) -> bool:
+    """Check if all keys exist in the specified dictionary with a value
+    other than None.
+
+    Return True if at least one key is not present or has value None."""
+    return any(starmap(check_key, zip_longest(keys, [dictionary],
+                                              fillvalue=dictionary)))
