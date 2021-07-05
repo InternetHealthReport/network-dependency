@@ -80,9 +80,9 @@ def read_scopes(reader: KafkaReader, min_peers: int, min_hege: float) -> dict:
                               f'{scope}. Present: '
                               f'{ret[scope].dependencies[asn]} New: {hege}')
                 continue
-            ret[scope].dependencies[asn] = hege
         else:
             ret[scope] = Scope(nb_peers)
+        ret[scope].dependencies[asn] = hege
     for scope in ret:
         compute_ranks(ret[scope])
     return ret
