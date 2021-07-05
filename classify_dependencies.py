@@ -102,9 +102,14 @@ def classify(bgp_scopes: dict,
         overlap_dependencies = tr_dependencies.intersection(bgp_dependencies)
         equal_dependencies = set()
         mismatched_dependencies = set()
-        for asn in overlap_dependencies:
-            if tr_scope.dependency_ranks[asn] \
-                    == bgp_scope.dependency_ranks[asn]:
+        overlap_bgp_scores = [(asn, bgp_scope.dependencies[asn])
+                              for asn in overlap_dependencies]
+        overlap_tr_scores = [(asn, tr_scope.dependencies[asn])
+                             for asn in overlap_dependencies]
+        overlap_bgp_scores.sort(key=lambda t: t[1], reverse=True)
+        overlap_tr_scores.sort(key=lambda t: t[1], reverse=True)
+        for idx, (asn, _) in enumerate(overlap_bgp_scores):
+            if asn == overlap_tr_scores[idx][0]:
                 equal_dependencies.add(asn)
             else:
                 mismatched_dependencies.add(asn)
