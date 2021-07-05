@@ -67,6 +67,9 @@ def read_scopes(reader: KafkaReader, min_peers: int, min_hege: float) -> dict:
         asn = msg['asn']
         hege = msg['hege']
         nb_peers = msg['nb_peers']
+        # Ignore "self" dependency with score 1.0.
+        if asn == scope:
+            continue
         if scope in ret:
             if ret[scope].nb_peers != nb_peers:
                 logging.warning(f'Inconsistent number of peers for scope '
