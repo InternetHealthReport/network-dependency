@@ -84,20 +84,37 @@ def process_msg(msg: dict, data: dict) -> int:
         if element['type'] not in {'R', 'A', 'W'}:
             continue
         as_path = element['fields']['as-path'].split(' ')
+        ip_path = None
+        # Only for traceroute-based RIBs.
+        if 'ip-path' in element['fields']:
+            ip_path = element['fields']['ip-path'].split(' ')
         for hop in range(len(as_path)):
             lneighbor, asn, rneighbor = map(parse_asn,
                                             get_as_triple(as_path, hop))
+            if ip_path:
+                # We treat both IPs and ASNs as strings, so we can apply
+                # the same function.
+                lneighbor_ip, ip, rneighbor_ip = \
+                    map(parse_asn, get_as_triple(ip_path, hop))
             # The for loops below are necessary since every hop might
             # be an AS set...
             # Increment counter for AS
-            for entry in asn:
+            for idx, entry in enumerate(asn):
+                if ip_path and ip[idx] == '*':
+                    continue
                 data[entry]['count'] += 1
+                if ip_path:
+                    data[entry]['unique_ips'].add(ip[idx])
             # Handle left neighbors
-            for neighbor in lneighbor:
+            for idx, neighbor in enumerate(lneighbor):
+                if ip_path and lneighbor_ip[idx] == '*':
+                    continue
                 for entry in asn:
                     data[entry]['lneighbors'][neighbor] += 1
             # Handle right neighbors
-            for neighbor in rneighbor:
+            for idx, neighbor in enumerate(rneighbor):
+                if ip_path and rneighbor_ip[idx] == '*':
+                    continue
                 for entry in asn:
                     data[entry]['rneighbors'][neighbor] += 1
         as_paths_in_msg += 1
@@ -120,12 +137,14 @@ def flush_data(data: dict,
            'total_as_paths': total_as_paths}
     for asn in data:
         msg['asn'] = asn
+        data[asn]['unique_ips'] = len(data[asn]['unique_ips'])
         msg.update(data[asn])
         writer.write(asn, msg, end_output_ts * 1000)
 
 
 def make_data_dict() -> dict:
     return {'count': 0,
+            'unique_ips': set(),
             'lneighbors': defaultdict(int),
             'rneighbors': defaultdict(int)}
 
