@@ -109,13 +109,17 @@ def process_msg(msg: dict, data: dict) -> int:
             for idx, neighbor in enumerate(lneighbor):
                 if ip_path and lneighbor_ip[idx] == '*':
                     continue
-                for entry in asn:
+                for as_idx, entry in enumerate(asn):
+                    if ip_path and ip[as_idx] == '*':
+                        continue
                     data[entry]['lneighbors'][neighbor] += 1
             # Handle right neighbors
             for idx, neighbor in enumerate(rneighbor):
                 if ip_path and rneighbor_ip[idx] == '*':
                     continue
-                for entry in asn:
+                for as_idx, entry in enumerate(asn):
+                    if ip_path and ip[as_idx] == '*':
+                        continue
                     data[entry]['rneighbors'][neighbor] += 1
         as_paths_in_msg += 1
     return as_paths_in_msg
@@ -137,7 +141,7 @@ def flush_data(data: dict,
            'total_as_paths': total_as_paths}
     for asn in data:
         msg['asn'] = asn
-        data[asn]['unique_ips'] = len(data[asn]['unique_ips'])
+        data[asn]['unique_ips'] = tuple(data[asn]['unique_ips'])
         msg.update(data[asn])
         writer.write(asn, msg, end_output_ts * 1000)
 
