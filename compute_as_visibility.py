@@ -9,7 +9,8 @@ from confluent_kafka import OFFSET_BEGINNING, OFFSET_END
 
 from network_dependency.kafka.kafka_reader import KafkaReader
 from network_dependency.kafka.kafka_writer import KafkaWriter
-from network_dependency.utils.helper_functions import parse_timestamp_argument
+from network_dependency.utils.helper_functions import parse_timestamp_argument, \
+    check_key, check_keys
 
 DATE_FMT = '%Y-%m-%dT%H:%M:%S'
 
@@ -44,13 +45,6 @@ def verify_config(config_path: str) -> configparser.ConfigParser:
     return config
 
 
-def check_key(key, data: dict) -> bool:
-    if key not in data or not data[key]:
-        logging.debug(f'Key {key} missing in message.')
-        return True
-    return False
-
-
 def parse_asn(asn: str) -> list:
     if not asn:
         return list()
@@ -77,8 +71,7 @@ def process_msg(msg: dict, data: dict) -> int:
     elements = msg['elements']
     as_paths_in_msg = 0
     for element in elements:
-        if check_key('type', element) \
-                or check_key('fields', element) \
+        if check_keys(['type', 'fields'], element) \
                 or check_key('as-path', element['fields']):
             continue
         if element['type'] not in {'R', 'A', 'W'}:
