@@ -2,6 +2,7 @@ import argparse
 import configparser
 import logging
 import sys
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 from network_dependency.kafka.kafka_reader import KafkaReader
@@ -88,6 +89,133 @@ def read_scopes(reader: KafkaReader, min_peers: int, min_hege: float) -> dict:
     return ret
 
 
+def compute_standard_competition_ranking(data: list) -> (int, dict, dict):
+    """Compute the standard competition ranking for the given data and
+    return the maximum rank and two dictionaries mapping the rank to a
+    set of AS numbers and the reverse, mapping the AS number to a rank.
+
+    Parameters
+    ----------
+    data : list
+        Sorted list of (asn, score) pairs.
+
+    Returns
+    -------
+    max_rank : int
+        Rank of last entry.
+    rank_asn_map : dict
+        Dictionary mapping each rank to a set of AS numbers.
+    asn_rank_map : dict
+        Dictionary mapping each AS number to a rank.
+
+    Notes
+    -----
+    In competition ranking, items that compare equal receive the same
+    ranking number, and then a gap is left in the ranking numbers.
+
+    Example:
+        Input: [(1, 1.0), (2, 0.5), (3, 0.5), (4, 0.1)]
+
+        Output ranking:
+            1 -> 0
+            2 -> 1
+            3 -> 1
+            4 -> 3
+    """
+    rank_asn_map = defaultdict(set)
+    asn_rank_map = dict()
+    prev_score = -1
+    curr_rank = -1
+    for asn, score in data:
+        if score != prev_score:
+            if curr_rank == -1:
+                curr_rank = 0
+            else:
+                curr_rank += len(rank_asn_map[curr_rank])
+        rank_asn_map[curr_rank].add(asn)
+        asn_rank_map[asn] = curr_rank
+        prev_score = score
+    return curr_rank, rank_asn_map, asn_rank_map
+
+
+def classify_overlapping_dependencies(bgp: list, tr: list) -> (set, set, dict):
+    """Classify overlapping dependencies based on their standard
+    competition rank.
+
+    Parameters
+    ----------
+    bgp : list
+        List of sorted BGP scores.
+    tr : list
+        List of sorted traceroute scores.
+
+    Returns
+    -------
+    equal : set
+        Set of equal dependency AS numbers.
+    mismatched : set
+        Set of mismatched dependency AS numbers.
+    asn_rank_map: dict
+        Dictionary mapping each AS number to a (bgp_rank, tr_rank) pair.
+
+    Notes
+    -----
+    Both input lists should be sorted by descending hegemony score.
+    The lists should contain tuples of the form (asn, score).
+    """
+    highest_bgp_rank, bgp_rank_asn_map, bgp_asn_rank_map = \
+        compute_standard_competition_ranking(bgp)
+    highest_tr_rank, tr_rank_asn_map, tr_asn_rank_map = \
+        compute_standard_competition_ranking(tr)
+    highest_rank = max(highest_bgp_rank, highest_tr_rank)
+
+    equal = set()
+    mismatched = set()
+    asn_competition_rank_map = dict()
+
+    for rank in range(highest_rank + 1):
+        if rank not in bgp_rank_asn_map and rank not in tr_rank_asn_map:
+            continue
+        elif rank not in bgp_rank_asn_map:
+            tr_asns = tr_rank_asn_map[rank]
+            mismatched.update(tr_asns)
+        elif rank not in tr_rank_asn_map:
+            bgp_asns = bgp_rank_asn_map[rank]
+            mismatched.update(bgp_asns)
+        else:
+            bgp_asns = bgp_rank_asn_map[rank]
+            tr_asns = tr_rank_asn_map[rank]
+            intersection = bgp_asns.intersection(tr_asns)
+            sym_difference = bgp_asns.symmetric_difference(tr_asns)
+            if not mismatched.isdisjoint(intersection) \
+                    or not equal.isdisjoint(sym_difference):
+                logging.warning('Overlap between previously mismatched '
+                                'dependencies and new equal dependencies or '
+                                'previously equal dependencies and new '
+                                'mismatched dependencies.')
+                logging.warning(f'eq: {equal}')
+                logging.warning(f'mm: {mismatched}')
+                logging.warning(f'new eq: {intersection}')
+                logging.warning(f'new mm: {sym_difference}')
+            equal.update(intersection)
+            mismatched.update(sym_difference)
+    if not equal.isdisjoint(mismatched):
+        logging.error(f'eq and mm are not disjoint.')
+        logging.error(f'eq: {equal}')
+        logging.error(f'mm: {mismatched}')
+    for asn in equal:
+        asn_competition_rank_map[asn] = (bgp_asn_rank_map[asn],
+                                         tr_asn_rank_map[asn])
+        if asn_competition_rank_map[asn][0] != asn_competition_rank_map[asn][1]:
+            logging.error(f'Equal dependency has unequal rank.')
+            logging.error(f'bgp: {asn_competition_rank_map[asn][0]}')
+            logging.error(f' tr: {asn_competition_rank_map[asn][1]}')
+    for asn in mismatched:
+        asn_competition_rank_map[asn] = (bgp_asn_rank_map[asn],
+                                         tr_asn_rank_map[asn])
+    return equal, mismatched, asn_competition_rank_map
+
+
 def classify(bgp_scopes: dict,
              tr_scopes: dict,
              timestamp: int,
@@ -103,19 +231,15 @@ def classify(bgp_scopes: dict,
         bgp_only_dependencies = bgp_dependencies - tr_dependencies
         tr_only_dependencies = tr_dependencies - bgp_dependencies
         overlap_dependencies = tr_dependencies.intersection(bgp_dependencies)
-        equal_dependencies = set()
-        mismatched_dependencies = set()
         overlap_bgp_scores = [(asn, bgp_scope.dependencies[asn])
                               for asn in overlap_dependencies]
         overlap_tr_scores = [(asn, tr_scope.dependencies[asn])
                              for asn in overlap_dependencies]
         overlap_bgp_scores.sort(key=lambda t: t[1], reverse=True)
         overlap_tr_scores.sort(key=lambda t: t[1], reverse=True)
-        for idx, (asn, _) in enumerate(overlap_bgp_scores):
-            if asn == overlap_tr_scores[idx][0]:
-                equal_dependencies.add(asn)
-            else:
-                mismatched_dependencies.add(asn)
+        equal_dependencies, mismatched_dependencies, asn_competition_rank = \
+            classify_overlapping_dependencies(overlap_bgp_scores,
+                                              overlap_tr_scores)
         bgp_only_scores = [(asn,
                             bgp_scope.dependencies[asn],
                             bgp_scope.dependency_ranks[asn])
@@ -129,14 +253,18 @@ def classify(bgp_scopes: dict,
         mismatched_scores = [(asn,
                               bgp_scope.dependencies[asn],
                               bgp_scope.dependency_ranks[asn],
+                              asn_competition_rank[asn][0],
                               tr_scope.dependencies[asn],
-                              tr_scope.dependency_ranks[asn])
+                              tr_scope.dependency_ranks[asn],
+                              asn_competition_rank[asn][1])
                              for asn in mismatched_dependencies]
         mismatched_scores.sort(key=lambda t: t[1], reverse=True)
         equal_scores = [(asn,
                          bgp_scope.dependencies[asn],
+                         bgp_scope.dependency_ranks[asn],
                          tr_scope.dependencies[asn],
-                         tr_scope.dependency_ranks[asn])
+                         tr_scope.dependency_ranks[asn],
+                         asn_competition_rank[asn][0])
                         for asn in equal_dependencies]
         equal_scores.sort(key=lambda t: t[1], reverse=True)
 
