@@ -1,6 +1,8 @@
 import argparse
+import bz2
 import configparser
 import logging
+import pickle
 import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -68,7 +70,7 @@ def read_visible_asns(reader: KafkaReader) -> dict:
         if check_keys(['asn', 'unique_ips'], msg):
             logging.warning(f'Skipping message with missing fields: {msg}')
             continue
-        ret[msg['asn']].update(set(msg['unique_ips']))
+        ret[msg['asn']].update(pickle.loads(bz2.decompress(msg['unique_ips'])))
     return ret
 
 

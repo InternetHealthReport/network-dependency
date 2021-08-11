@@ -1,6 +1,8 @@
 import argparse
+import bz2
 import configparser
 import logging
+import pickle
 import sys
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -76,11 +78,14 @@ def process_msg(msg: dict, data: dict) -> int:
             continue
         if element['type'] not in {'R', 'A', 'W'}:
             continue
-        as_path = element['fields']['as-path'].split(' ')
-        ip_path = None
-        # Only for traceroute-based RIBs.
-        if 'ip-path' in element['fields']:
-            ip_path = element['fields']['ip-path'].split(' ')
+        if check_keys(['full-as-path', 'full-ip-path'], element['fields']):
+            as_path = element['fields']['as-path'].split(' ')
+            ip_path = None
+        else:
+            # Only for traceroute-based RIBs.
+            as_path = element['fields']['full-as-path'].split(' ')
+            ip_path = element['fields']['full-ip-path'].split(' ')
+        unique_asn_in_path = set()
         for hop in range(len(as_path)):
             lneighbor, asn, rneighbor = map(parse_asn,
                                             get_as_triple(as_path, hop))
@@ -93,27 +98,34 @@ def process_msg(msg: dict, data: dict) -> int:
             # be an AS set...
             # Increment counter for AS
             for idx, entry in enumerate(asn):
-                if ip_path and ip[idx] == '*':
+                if entry == 0 or ip_path and ip[idx] == '*':
                     continue
-                data[entry]['count'] += 1
+                # The full-as-path of traceroute-based RIBs is not
+                # deduplicated, but we only want to count each AS once
+                # to make it comparable with BGP-based RIBs. Also we do
+                # not want the count to be higher than the total number
+                # of AS paths.
+                if entry not in unique_asn_in_path:
+                    data[entry]['count'] += 1
+                    unique_asn_in_path.add(entry)
                 if ip_path:
                     data[entry]['unique_ips'].add(ip[idx])
             # Handle left neighbors
-            for idx, neighbor in enumerate(lneighbor):
-                if ip_path and lneighbor_ip[idx] == '*':
-                    continue
-                for as_idx, entry in enumerate(asn):
-                    if ip_path and ip[as_idx] == '*':
-                        continue
-                    data[entry]['lneighbors'][neighbor] += 1
+            # for idx, neighbor in enumerate(lneighbor):
+            #     if neighbor == 0 or ip_path and lneighbor_ip[idx] == '*':
+            #         continue
+            #     for as_idx, entry in enumerate(asn):
+            #         if entry == 0 or ip_path and ip[as_idx] == '*':
+            #             continue
+            #         data[entry]['lneighbors'][neighbor] += 1
             # Handle right neighbors
-            for idx, neighbor in enumerate(rneighbor):
-                if ip_path and rneighbor_ip[idx] == '*':
-                    continue
-                for as_idx, entry in enumerate(asn):
-                    if ip_path and ip[as_idx] == '*':
-                        continue
-                    data[entry]['rneighbors'][neighbor] += 1
+            # for idx, neighbor in enumerate(rneighbor):
+            #     if neighbor == 0 or ip_path and rneighbor_ip[idx] == '*':
+            #         continue
+            #     for as_idx, entry in enumerate(asn):
+            #         if entry == 0 or ip_path and ip[as_idx] == '*':
+            #             continue
+            #         data[entry]['rneighbors'][neighbor] += 1
         as_paths_in_msg += 1
     return as_paths_in_msg
 
@@ -134,7 +146,9 @@ def flush_data(data: dict,
            'total_as_paths': total_as_paths}
     for asn in data:
         msg['asn'] = asn
-        data[asn]['unique_ips'] = tuple(data[asn]['unique_ips'])
+        data[asn]['unique_ips'] = bz2.compress(
+            pickle.dumps(data[asn]['unique_ips']))
+        # data[asn]['unique_ips'] = len(data[asn]['unique_ips'])
         msg.update(data[asn])
         writer.write(asn, msg, end_output_ts * 1000)
 
@@ -142,8 +156,9 @@ def flush_data(data: dict,
 def make_data_dict() -> dict:
     return {'count': 0,
             'unique_ips': set(),
-            'lneighbors': defaultdict(int),
-            'rneighbors': defaultdict(int)}
+            # 'lneighbors': defaultdict(int),
+            # 'rneighbors': defaultdict(int)
+            }
 
 
 def process_interval(start_output_ts: int,
