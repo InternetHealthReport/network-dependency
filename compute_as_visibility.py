@@ -245,7 +245,11 @@ def main() -> None:
                          start_ts,
                          end_ts)
     writer = KafkaWriter(config.get('output', 'kafka_topic'),
-                         config.get('kafka', 'bootstrap_servers'))
+                         config.get('kafka', 'bootstrap_servers'),
+                         num_partitions=10,
+                         replication_factor=2,
+                         # 2 months
+                         config={'retention.ms': 5184000000})
 
     with reader, writer:
         process_interval(start_output_ts, end_output_ts, reader, writer)
