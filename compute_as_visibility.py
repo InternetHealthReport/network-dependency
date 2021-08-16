@@ -86,6 +86,7 @@ def process_msg(msg: dict, data: dict) -> int:
             as_path = element['fields']['full-as-path'].split(' ')
             ip_path = element['fields']['full-ip-path'].split(' ')
         unique_asn_in_path = set()
+        last_hop = len(as_path) - 1
         for hop in range(len(as_path)):
             lneighbor, asn, rneighbor = map(parse_asn,
                                             get_as_triple(as_path, hop))
@@ -109,7 +110,13 @@ def process_msg(msg: dict, data: dict) -> int:
                     data[entry]['count'] += 1
                     unique_asn_in_path.add(entry)
                 if ip_path:
-                    data[entry]['unique_ips'].add(ip[idx])
+                    if hop == last_hop:
+                        data[entry]['last_hop_ips'].add(ip[idx])
+                    else:
+                        data[entry]['transit_ips'].add(ip[idx])
+                if hop == last_hop:
+                    data[entry]['last_hop_count'] += 1
+
             # Handle left neighbors
             # for idx, neighbor in enumerate(lneighbor):
             #     if neighbor == 0 or ip_path and lneighbor_ip[idx] == '*':
@@ -146,16 +153,19 @@ def flush_data(data: dict,
            'total_as_paths': total_as_paths}
     for asn in data:
         msg['asn'] = asn
-        data[asn]['unique_ips'] = bz2.compress(
-            pickle.dumps(data[asn]['unique_ips']))
-        # data[asn]['unique_ips'] = len(data[asn]['unique_ips'])
+        data[asn]['transit_ips'] = bz2.compress(
+            pickle.dumps(data[asn]['transit_ips']))
+        data[asn]['last_hop_ips'] = bz2.compress(
+            pickle.dumps(data[asn]['last_hop_ips']))
         msg.update(data[asn])
         writer.write(asn, msg, end_output_ts * 1000)
 
 
 def make_data_dict() -> dict:
     return {'count': 0,
-            'unique_ips': set(),
+            'last_hop_count': 0,
+            'transit_ips': set(),
+            'last_hop_ips': set(),
             # 'lneighbors': defaultdict(int),
             # 'rneighbors': defaultdict(int)
             }

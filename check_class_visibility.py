@@ -64,14 +64,20 @@ def read_class_dependencies(reader: KafkaReader,
     return included - excluded
 
 
-def read_visible_asns(reader: KafkaReader) -> dict:
-    ret = defaultdict(set)
+def read_visible_asns(reader: KafkaReader) -> (dict, dict, dict):
+    ret_unique = defaultdict(set)
+    ret_transit = defaultdict(set)
+    ret_last_hop = defaultdict(set)
     for msg in reader.read():
-        if check_keys(['asn', 'unique_ips'], msg):
+        if check_keys(['asn', 'transit_ips', 'last_hop_ips'], msg):
             logging.warning(f'Skipping message with missing fields: {msg}')
             continue
-        ret[msg['asn']].update(pickle.loads(bz2.decompress(msg['unique_ips'])))
-    return ret
+        transit = pickle.loads(bz2.decompress(msg['transit_ips']))
+        last_hop = pickle.loads(bz2.decompress(msg['last_hop_ips']))
+        ret_transit[msg['asn']].update(transit)
+        ret_last_hop[msg['asn']].update(last_hop)
+        ret_unique[msg['asn']].update(transit.union(last_hop))
+    return ret_unique, ret_transit, ret_last_hop
 
 
 def main() -> None:
@@ -119,7 +125,8 @@ def main() -> None:
     visibility_reader = KafkaReader([visibility_topic], bootstrap_servers,
                                     lookback_start_ts, lookback_end_ts)
     with visibility_reader:
-        visible_asns = read_visible_asns(visibility_reader)
+        visible_asns, visible_asns_transit, visible_asns_last_hop = \
+            read_visible_asns(visibility_reader)
 
     class_reader = KafkaReader([classification_topic], bootstrap_servers,
                                lookup_ts * 1000, lookback_end_ts)
@@ -163,10 +170,14 @@ def main() -> None:
             for asn in visible_with_threshold:
                 msg['asn'] = asn
                 msg['unique_ips'] = threshold
+                msg['transit_ips'] = len(visible_asns_transit[asn])
+                msg['last_hop_ips'] = len(visible_asns_last_hop[asn])
                 class_writer.write(asn, msg, lookup_ts * 1000)
         for asn in remaining_included_asns:
             msg['asn'] = asn
             msg['unique_ips'] = 0
+            msg['transit_ips'] = 0
+            msg['last_hop_ips'] = 0
             class_writer.write(asn, msg, lookup_ts * 1000)
 
 
