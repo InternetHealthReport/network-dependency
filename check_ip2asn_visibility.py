@@ -7,8 +7,9 @@ from collections import namedtuple
 from datetime import datetime, timezone
 
 from network_dependency.kafka.kafka_reader import KafkaReader
-from network_dependency.utils.helper_functions import parse_timestamp_argument, \
-    check_keys
+from network_dependency.kafka.kafka_writer import KafkaWriter
+from network_dependency.utils.helper_functions import \
+    parse_timestamp_argument, check_keys
 from network_dependency.utils.ip_lookup import IPLookup, Visibility
 
 DATE_FMT = '%Y-%m-%dT%H:%M'
@@ -27,7 +28,6 @@ def check_config(config_path: str) -> configparser.ConfigParser:
     config.read(config_path)
     try:
         config.get('input', 'kafka_topic')
-        config.get('output', 'data_directory')
         config.get('kafka', 'bootstrap_servers')
         config.get('ip2asn', 'path')
         config.get('ip2asn', 'db')
@@ -39,6 +39,12 @@ def check_config(config_path: str) -> configparser.ConfigParser:
         return configparser.ConfigParser()
     except configparser.NoOptionError as e:
         logging.error(f'Missing option in config file: {e}')
+        return configparser.ConfigParser()
+    output_specified = config.get('output', 'data_directory', fallback=None) \
+                       or config.get('output', 'kafka_topic', fallback=None)
+    if not output_specified:
+        logging.error('No output specified in config file. At least one of '
+                      '[data_directory, kafka_topic] is required.')
         return configparser.ConfigParser()
     return config
 
@@ -61,6 +67,41 @@ def process_msg(msg: dict, lookup: IPLookup) -> Dependency:
                       str(visibility.ip2asn_prefixes.prefix_ip_sum),
                       str(visibility.ip2ixp_prefixes.prefix_count),
                       str(visibility.ip2ixp_prefixes.prefix_ip_sum))
+
+
+def write_csv_output(data_dir: str,
+                     input_topic: str,
+                     start_ts_dt: datetime,
+                     dependencies: list) -> None:
+    if not data_dir.endswith('/'):
+        data_dir += '/'
+    output_file = data_dir + 'ip2asn_visibility.' + input_topic + '.' + \
+                  start_ts_dt.strftime(DATE_FMT) + OUTPUT_EXTENSION
+    output_lines = [('asn', 'unique_ips', 'transit_ips', 'last_hop_ips',
+                     'rib_prefix_count', 'rib_prefix_ip_sum',
+                     'ixp_prefix_count', 'ixp_prefix_ip_sum')] + dependencies
+    os.makedirs(data_dir, exist_ok=True)
+    logging.info(f'Writing {len(dependencies)} entries to file {output_file}')
+    with open(output_file, 'w') as f:
+        f.write('\n'.join([OUTPUT_DELIMITER.join(map(str, line))
+                           for line in output_lines]))
+
+
+def write_kafka_output(output_topic: str,
+                       bootstrap_servers: str,
+                       output_ts: int,
+                       dependencies: list) -> None:
+    logging.info(f'Writing {len(dependencies)} entries to topic {output_topic}')
+    writer = KafkaWriter(output_topic,
+                         bootstrap_servers,
+                         num_partitions=10,
+                         # 2 months
+                         config={'retention.ms': 5184000000})
+    msg = {'timestamp': int(output_ts / 1000)}
+    with writer:
+        for dependency in dependencies:
+            msg.update(dependency._asdict())
+            writer.write(msg['asn'], msg, output_ts)
 
 
 def main() -> None:
@@ -112,19 +153,16 @@ def main() -> None:
     dependencies.sort(key=lambda t: (t[1], t[4], t[6]))
     logging.info(f'Read {len(dependencies)} ASes from kafka topic.')
 
-    data_dir = config.get('output', 'data_directory')
-    if not data_dir.endswith('/'):
-        data_dir += '/'
-    output_file = data_dir + 'ip2asn_visibility.' + input_topic + '.' + \
-                  start_ts_dt.strftime(DATE_FMT) + OUTPUT_EXTENSION
-    output_lines = [('asn', 'unique_ips', 'transit_ips', 'last_hop_ips',
-                     'rib_prefix_count', 'rib_prefix_ip_sum',
-                     'ixp_prefix_count', 'ixp_prefix_ip_sum')] + dependencies
-    os.makedirs(data_dir, exist_ok=True)
-    logging.info(f'Writing {len(output_lines)} lines to {output_file}')
-    with open(output_file, 'w') as f:
-        f.write('\n'.join([OUTPUT_DELIMITER.join(map(str, line))
-                           for line in output_lines]))
+    data_dir = config.get('output', 'data_directory', fallback=None)
+    if data_dir:
+        write_csv_output(data_dir, input_topic, start_ts_dt, dependencies)
+
+    output_topic = config.get('output', 'kafka_topic', fallback=None)
+    if output_topic:
+        write_kafka_output(output_topic,
+                           bootstrap_servers,
+                           start_ts,
+                           dependencies)
 
 
 if __name__ == '__main__':
