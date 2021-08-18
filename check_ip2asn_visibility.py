@@ -63,10 +63,10 @@ def process_msg(msg: dict, lookup: IPLookup) -> Dependency:
                       unique_ips,
                       transit_ips,
                       last_hop_ips,
-                      str(visibility.ip2asn_prefixes.prefix_count),
-                      str(visibility.ip2asn_prefixes.prefix_ip_sum),
-                      str(visibility.ip2ixp_prefixes.prefix_count),
-                      str(visibility.ip2ixp_prefixes.prefix_ip_sum))
+                      visibility.ip2asn_prefixes.prefix_count,
+                      visibility.ip2asn_prefixes.prefix_ip_sum,
+                      visibility.ip2ixp_prefixes.prefix_count,
+                      visibility.ip2ixp_prefixes.prefix_ip_sum)
 
 
 def write_csv_output(data_dir: str,
