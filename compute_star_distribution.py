@@ -5,14 +5,8 @@ from collections import defaultdict
 
 from network_dependency.kafka.kafka_reader import KafkaReader
 from network_dependency.kafka.kafka_writer import KafkaWriter
-from network_dependency.utils.helper_functions import parse_timestamp_argument
-
-
-def check_key(key, data: dict) -> bool:
-    if key not in data or not data[key]:
-        logging.debug(f'Key {key} missing in message.')
-        return True
-    return False
+from network_dependency.utils.helper_functions import \
+    parse_timestamp_argument, check_key, check_keys
 
 
 def parse_hop(hop: str) -> list:
@@ -41,8 +35,7 @@ def process_msg(msg: dict, data: dict) -> None:
         return
     for element in msg['elements']:
         if check_key('fields', element) \
-                or check_key('as-path', element['fields']) \
-                or check_key('full-ip-path', element['fields']):
+                or check_keys(['as-path', 'full-ip-path'], element['fields']):
             continue
         star_distribution = \
             get_star_distribution(element['fields']['full-ip-path'])
@@ -107,7 +100,11 @@ def main() -> None:
     logging.info(f'Writing to topic: {output_topic}')
 
     reader = KafkaReader([rib_topic], args.server, start_ts, end_ts)
-    writer = KafkaWriter(output_topic, args.server)
+    writer = KafkaWriter(output_topic,
+                         args.server,
+                         num_partitions=10,
+                         # 2 months
+                         config={'retention.ms': 5184000000})
 
     with reader:
         scope_data = get_distributions(reader)
