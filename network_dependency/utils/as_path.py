@@ -41,6 +41,15 @@ class ASPath:
     def has_too_many_hops(self) -> bool:
         return 'too_many_hops' in self.attributes
 
+    def contains_ip(self, ip: str) -> bool:
+        for as_, ip_ in self.nodes:
+            if isinstance(ip_, tuple):
+                if ip in ip_:
+                    return True
+            elif ip == ip_:
+                return True
+        return False
+
     def get_raw_path(self) -> (str, str):
         """Return the raw AS path as a space-separated list."""
         if len(self.nodes) == 0:

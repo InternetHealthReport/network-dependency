@@ -51,10 +51,13 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
             # Should be treated the same as 'error' in hop.
             stats['dnf'] += 1
             return True
-        if 'err' in reply:
+        if 'err' in reply \
+                and 'from' in reply \
+                and path.contains_ip(reply['from']):
             # Reply received with ICMP error (e.g., network unreachable)
-            logging.debug('Skipping erroneous reply in traceroute: {}'
-                          .format(msg))
+            # We allow this reply once, if the IP was not seen before.
+            logging.debug(f'Skipping erroneous reply with existing IP: '
+                          f'{msg}')
             continue
         if 'x' in reply:
             # Timeout
