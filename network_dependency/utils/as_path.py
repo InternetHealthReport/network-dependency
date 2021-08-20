@@ -10,6 +10,7 @@ class ASPath:
         self.start_as = 0
         self.end_as = 0
         self.attributes = dict()
+        self.trailing_timeouts_pruned = False
 
     def __str__(self) -> str:
         return ' '.join(map(str, self.nodes))
@@ -19,6 +20,7 @@ class ASPath:
             self.ixp_nodes.append(len(self.nodes))
         self.nodes.append((as_, ip))
         self.reduced_ixp_nodes_updated = False
+        self.trailing_timeouts_pruned = False
 
     def append_set(self,
                    as_set: tuple,
@@ -28,6 +30,7 @@ class ASPath:
             self.ixp_nodes.append(len(self.nodes))
         self.nodes.append((as_set, ip_set))
         self.reduced_ixp_nodes_updated = False
+        self.trailing_timeouts_pruned = False
 
     def set_start_end_asn(self, start: int = 0, end: int = 0):
         if start != 0:
@@ -50,10 +53,25 @@ class ASPath:
                 return True
         return False
 
+    def __prune_trailing_timeouts(self) -> None:
+        self.trailing_timeouts_pruned = True
+        cutoff = 0
+        for idx, (as_, ip) in enumerate(self.nodes[::-1]):
+            if isinstance(ip, tuple) and any(x != '*' for x in ip) \
+                    or ip != '*':
+                cutoff = idx
+                break
+        if cutoff > 0:
+            # Remove all trailing * nodes and replace them with a single
+            # * node.
+            self.nodes = self.nodes[:-cutoff] + [(0, '*')]
+
     def get_raw_path(self) -> (str, str):
         """Return the raw AS path as a space-separated list."""
         if len(self.nodes) == 0:
             return str()
+        if not self.trailing_timeouts_pruned:
+            self.__prune_trailing_timeouts()
         as_path = list()
         ip_path = list()
         for as_, ip in self.nodes:
@@ -80,6 +98,8 @@ class ASPath:
             if stats:
                 stats['empty_path'] += 1
             return str(), str(), 0
+        if not self.trailing_timeouts_pruned:
+            self.__prune_trailing_timeouts()
         unique_as = set()
         # Used to keep track of how many hops we discarded because we
         # failed to map them. We can use this as an additional filter
