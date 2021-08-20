@@ -8,7 +8,8 @@ from network_dependency.kafka.kafka_reader import KafkaReader
 from network_dependency.kafka.kafka_writer import KafkaWriter
 from network_dependency.utils import atlas_api_helper
 from network_dependency.utils.as_path import ASPath
-from network_dependency.utils.helper_functions import convert_date_to_epoch, parse_timestamp_argument
+from network_dependency.utils.helper_functions import convert_date_to_epoch, \
+    parse_timestamp_argument
 from network_dependency.utils.ip_lookup import IPLookup
 
 stats = {'total': 0,
@@ -21,6 +22,7 @@ stats = {'total': 0,
          'changed_ip': 0,
          'accepted': 0,
          'dnf': 0,
+         'too_many_hops': 0,
          'empty_path': 0,
          'single_as': 0,
          'used': 0,
@@ -93,6 +95,8 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         address = reply_addresses.pop()
         if address == '*':
             path.append(0, '*')
+            if hop['hop'] == 255:
+                path.flag_too_many_hops()
         else:
             ixp = lookup.ip2ixpid(address)
             if ixp != 0:
@@ -159,7 +163,8 @@ def process_message(msg: dict,
     for hop in traceroute:
         if process_hop(msg, hop, lookup, path):
             return dict()
-    reduced_path, reduced_ip_path, reduced_path_len = path.get_reduced_path(stats)
+    reduced_path, reduced_ip_path, reduced_path_len = path.get_reduced_path(
+        stats)
     if reduced_path_len == 0:
         return dict()
     elif reduced_path_len == 1:
@@ -169,6 +174,8 @@ def process_message(msg: dict,
         return dict()
     raw_path, raw_ip_path = path.get_raw_path()
     stats['used'] += 1
+    if path.has_too_many_hops():
+        stats['too_many_hops'] += 1
     ret = {'rec': {'status': 'valid',
                    'time': unified_timestamp},
            'elements': [{
@@ -234,6 +241,10 @@ def print_stats() -> None:
           f'{p_total * stats["used"]:6.2f}% '
           f'{p_accepted * stats["used"]:6.2f}% '
           f'{100:6.2f}%')
+    print(f'   Too many hops: {stats["too_many_hops"]:7d} '
+          f'{p_total * stats["too_many_hops"]:6.2f}% '
+          f'{p_accepted * stats["too_many_hops"]:6.2f}% '
+          f'{p_used * stats["too_many_hops"]:6.2f}%')
     print(f'Start AS missing: {stats["start_as_missing"]:7d} '
           f'{p_total * stats["start_as_missing"]:6.2f}% '
           f'{p_accepted * stats["start_as_missing"]:6.2f}% '

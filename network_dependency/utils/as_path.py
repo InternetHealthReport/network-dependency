@@ -35,6 +35,12 @@ class ASPath:
         if end != 0:
             self.end_as = end
 
+    def flag_too_many_hops(self) -> None:
+        self.attributes['too_many_hops'] = True
+
+    def has_too_many_hops(self) -> bool:
+        return 'too_many_hops' in self.attributes
+
     def get_raw_path(self) -> (str, str):
         """Return the raw AS path as a space-separated list."""
         if len(self.nodes) == 0:
