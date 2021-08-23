@@ -53,6 +53,14 @@ class ASPath:
                 return True
         return False
 
+    def mark_hop_error(self, error: str) -> None:
+        if 'errors' not in self.attributes:
+            self.attributes['errors'] = list()
+        self.attributes['errors'].append((len(self.nodes), error))
+
+    def has_errors(self) -> bool:
+        return 'errors' in self.attributes
+
     def __prune_trailing_timeouts(self) -> None:
         self.trailing_timeouts_pruned = True
         cutoff = 0

@@ -26,6 +26,7 @@ stats = {'total': 0,
          'single_as': 0,
          'used': 0,
          'too_many_hops': 0,
+         'errors': 0,
          'start_as_missing': 0,
          'end_as_missing': 0,
          'ixp_in_path': 0,
@@ -44,6 +45,7 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         return True
     replies = hop['result']
     reply_addresses = set()
+    errors_in_hop = set()
     for reply in replies:
         if 'error' in reply:
             # This seems to be a bug that happens if sending the packet
@@ -67,6 +69,8 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
             logging.debug('No "from" in hop {}'.format(msg))
             reply_addresses.add('*')
         else:
+            if 'err' in reply:
+                errors_in_hop.add(reply['err'])
             reply_addresses.add(reply['from'])
     if len(reply_addresses) == 0:
         logging.debug('Traceroute did not reach destination: {}'
@@ -79,6 +83,11 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         # Remove timeout placeholder from set (if
         # applicable) so that a real IP is chosen.
         reply_addresses.discard('*')
+    if errors_in_hop:
+        # However unlikely it is that we have two different errors
+        # present in replies for the same hop, just in case, handle it.
+        # For a single error, this results in a normal string.
+        error_str = ' '.join(map(str, errors_in_hop))
     if len(reply_addresses) > 1:
         # Still a set after * removal. Add as set.
         as_set = list()
@@ -93,6 +102,8 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
                 contains_ixp = True
             as_set.append(lookup.ip2asn(address))
             ip_set.append(address)
+        if errors_in_hop:
+            path.mark_hop_error(error_str)
         path.append_set(tuple(as_set), tuple(ip_set), contains_ixp)
     else:
         address = reply_addresses.pop()
@@ -105,6 +116,8 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
             if ixp != 0:
                 # We represent IXPs with negative "AS numbers".
                 path.append(ixp * -1, address, ixp=True)
+            if errors_in_hop:
+                path.mark_hop_error(error_str)
             path.append(lookup.ip2asn(address), address)
     return False
 
@@ -179,6 +192,8 @@ def process_message(msg: dict,
     stats['used'] += 1
     if path.has_too_many_hops():
         stats['too_many_hops'] += 1
+    if path.has_errors():
+        stats['errors'] += 1
     ret = {'rec': {'status': 'valid',
                    'time': unified_timestamp},
            'elements': [{
@@ -248,6 +263,10 @@ def print_stats() -> None:
           f'{p_total * stats["too_many_hops"]:6.2f}% '
           f'{p_accepted * stats["too_many_hops"]:6.2f}% '
           f'{p_used * stats["too_many_hops"]:6.2f}%')
+    print(f'     With errors: {stats["errors"]:7d} '
+          f'{p_total * stats["errors"]:6.2f}% '
+          f'{p_accepted * stats["errors"]:6.2f}% '
+          f'{p_used * stats["errors"]:6.2f}%')
     print(f'Start AS missing: {stats["start_as_missing"]:7d} '
           f'{p_total * stats["start_as_missing"]:6.2f}% '
           f'{p_accepted * stats["start_as_missing"]:6.2f}% '
