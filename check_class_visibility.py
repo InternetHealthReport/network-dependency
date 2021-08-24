@@ -44,9 +44,10 @@ def check_config(config_path: str) -> configparser.ConfigParser:
 
 def read_class_dependencies(reader: KafkaReader,
                             included_classes: list,
-                            excluded_classes: list) -> set:
+                            excluded_classes: list) -> (set, dict):
     included = set()
     excluded = set()
+    included_scope_count = defaultdict(int)
     for msg in reader.read():
         if check_keys(included_classes + excluded_classes, msg):
             logging.warning(f'Skipping message with missing fields: {msg}')
@@ -56,12 +57,13 @@ def read_class_dependencies(reader: KafkaReader,
                 asn = entry[0]
                 if asn not in included:
                     included.add(asn)
+                included_scope_count[asn] += 1
         for class_name in excluded_classes:
             for entry in msg[class_name]:
                 asn = entry[0]
                 if asn not in excluded:
                     excluded.add(asn)
-    return included - excluded
+    return included - excluded, included_scope_count
 
 
 def read_visible_asns(reader: KafkaReader) -> (dict, dict, dict):
@@ -131,8 +133,9 @@ def main() -> None:
     class_reader = KafkaReader([classification_topic], bootstrap_servers,
                                lookup_ts * 1000, lookback_end_ts)
     with class_reader:
-        included_asns = read_class_dependencies(class_reader, included_classes,
-                                                excluded_classes)
+        included_asns, included_scope_count = \
+            read_class_dependencies(class_reader, included_classes,
+                                    excluded_classes)
 
     class_writer = KafkaWriter(config.get('output', 'kafka_topic'),
                                bootstrap_servers,
@@ -169,12 +172,14 @@ def main() -> None:
                           f'{len(remaining_included_asns):5d}')
             for asn in visible_with_threshold:
                 msg['asn'] = asn
+                msg['scopes'] = included_scope_count[asn]
                 msg['unique_ips'] = threshold
                 msg['transit_ips'] = len(visible_asns_transit[asn])
                 msg['last_hop_ips'] = len(visible_asns_last_hop[asn])
                 class_writer.write(asn, msg, lookup_ts * 1000)
         for asn in remaining_included_asns:
             msg['asn'] = asn
+            msg['scopes'] = included_scope_count[asn]
             msg['unique_ips'] = 0
             msg['transit_ips'] = 0
             msg['last_hop_ips'] = 0
