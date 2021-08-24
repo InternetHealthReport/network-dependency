@@ -16,8 +16,8 @@ DATE_FMT = '%Y-%m-%dT%H:%M'
 OUTPUT_EXTENSION = '.csv'
 OUTPUT_DELIMITER = ','
 
-DEPENDENCY_FIELDS = ['asn', 'unique_ips', 'transit_ips', 'last_hop_ips',
-                     'rib_prefix_count', 'rib_prefix_ip_sum',
+DEPENDENCY_FIELDS = ['asn', 'scopes', 'unique_ips', 'transit_ips',
+                     'last_hop_ips', 'rib_prefix_count', 'rib_prefix_ip_sum',
                      'ixp_prefix_count', 'ixp_prefix_ip_sum']
 Dependency = namedtuple('Dependency', DEPENDENCY_FIELDS,
                         defaults=[0] * len(DEPENDENCY_FIELDS))
@@ -50,16 +50,18 @@ def check_config(config_path: str) -> configparser.ConfigParser:
 
 
 def process_msg(msg: dict, lookup: IPLookup) -> Dependency:
-    keys = ['asn', 'unique_ips', 'transit_ips', 'last_hop_ips']
+    keys = ['asn', 'scopes', 'unique_ips', 'transit_ips', 'last_hop_ips']
     if check_keys(keys, msg):
         logging.warning(f'Missing keys {keys} in message: {msg}')
         return Dependency()
     asn = msg['asn']
+    scopes = msg['scopes']
     unique_ips = msg['unique_ips']
     transit_ips = msg['transit_ips']
     last_hop_ips = msg['last_hop_ips']
     visibility: Visibility = lookup.asn2source(asn)
     return Dependency(asn,
+                      scopes,
                       unique_ips,
                       transit_ips,
                       last_hop_ips,
@@ -77,8 +79,8 @@ def write_csv_output(data_dir: str,
         data_dir += '/'
     output_file = data_dir + 'ip2asn_visibility.' + input_topic + '.' + \
                   start_ts_dt.strftime(DATE_FMT) + OUTPUT_EXTENSION
-    output_lines = [('asn', 'unique_ips', 'transit_ips', 'last_hop_ips',
-                     'rib_prefix_count', 'rib_prefix_ip_sum',
+    output_lines = [('asn', 'scopes', 'unique_ips', 'transit_ips',
+                     'last_hop_ips', 'rib_prefix_count', 'rib_prefix_ip_sum',
                      'ixp_prefix_count', 'ixp_prefix_ip_sum')] + dependencies
     os.makedirs(data_dir, exist_ok=True)
     logging.info(f'Writing {len(dependencies)} entries to file {output_file}')
@@ -150,7 +152,7 @@ def main() -> None:
                 continue
             dependencies.append(dependency)
     # Sort by ascending unique_ips, rip_prefix_count, ixp_prefix_count
-    dependencies.sort(key=lambda t: (t[1], t[4], t[6]))
+    dependencies.sort(key=lambda t: (t[2], t[5], t[7]))
     logging.info(f'Read {len(dependencies)} ASes from kafka topic.')
 
     data_dir = config.get('output', 'data_directory', fallback=None)
