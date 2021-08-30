@@ -203,6 +203,9 @@ def main() -> None:
         f'ihr_bgp_{config.get("output", "collector")}_updates'
     logging.info(f'Copying messages from updates topic {input_updates_topic} '
                  f'to {output_updates_topic}')
+    if end_ts != OFFSET_END:
+        # Updates topic message have an incremented timestamp.
+        end_ts += 1000
     updates_reader = KafkaReader([input_updates_topic],
                                  bootstrap_servers,
                                  start_ts,
