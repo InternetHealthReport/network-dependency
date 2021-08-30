@@ -208,7 +208,7 @@ def process_message(msg: dict,
                    'full-ip-path': raw_ip_path,
                    'full-ixp-path-indexes': path.get_raw_ixp_indexes(),
                    'prefix': prefix,
-                   'path-attributes:': path.attributes
+                   'path-attributes': path.attributes
                }
            }]
            }
