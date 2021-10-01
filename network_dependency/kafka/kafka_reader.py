@@ -1,4 +1,5 @@
 import logging
+import uuid
 
 import confluent_kafka
 import msgpack
@@ -39,7 +40,7 @@ class KafkaReader:
     def subscribe(self):
         self.consumer = Consumer({
             'bootstrap.servers': self.bootstrap_servers,
-            'group.id': self.topics[0] + '_reader',
+            'group.id': self.topics[0] + '_reader_' + str(uuid.uuid4()),
             'auto.offset.reset': 'earliest',
             'max.poll.interval.ms': 1800 * 1000,
             'enable.partition.eof': True
