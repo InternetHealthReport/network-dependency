@@ -115,7 +115,7 @@ class IPLookup:
                     continue
                 if val['asn'] is None:
                     continue
-                asn = str(val['asn'])
+                asn = val['asn']
                 if val['ipaddr4'] is not None:
                     if val['ipaddr4'] not in self.ixp_asn_dict:
                         self.ixp_ipv4_asns[asn].prefix_count += 1
