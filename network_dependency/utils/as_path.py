@@ -171,6 +171,9 @@ class ASPath:
                 stats['empty_path'] += 1
             return str(), str(), 0
         if self.start_as != 0 and as_path[0] != self.start_as:
+            if self.start_as in unique_as:
+                stats['start_as_in_path'] += 1
+                return str(), str(), 0
             if stats:
                 stats['start_as_missing'] += 1
             self.attributes['start_as_missing'] = True
@@ -183,6 +186,9 @@ class ASPath:
             # of the path after the index calculation.
             self.reduced_ixp_nodes = [e + 1 for e in self.reduced_ixp_nodes]
         if self.end_as != 0 and as_path[-1] != self.end_as:
+            if self.end_as in unique_as:
+                stats['end_as_in_path'] += 1
+                return str(), str(), 0
             if stats:
                 stats['end_as_missing'] += 1
             self.attributes['end_as_missing'] = True

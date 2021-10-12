@@ -23,6 +23,8 @@ stats = {'total': 0,
          'accepted': 0,
          'dnf': 0,
          'empty_path': 0,
+         'end_as_in_path': 0,
+         'start_as_in_path': 0,
          'single_as': 0,
          'used': 0,
          'too_many_hops': 0,
@@ -252,6 +254,12 @@ def print_stats() -> None:
     print(f'      Empty path: {stats["empty_path"]:7d} '
           f'{p_total * stats["empty_path"]:6.2f}% '
           f'{p_accepted * stats["empty_path"]:6.2f}%')
+    print(f'Start AS in path: {stats["start_as_in_path"]:7d} '
+          f'{p_total * stats["start_as_in_path"]:6.2f}% '
+          f'{p_accepted * stats["start_as_in_path"]:6.2f}%')
+    print(f'  End AS in path: {stats["end_as_in_path"]:7d} '
+          f'{p_total * stats["end_as_in_path"]:6.2f}% '
+          f'{p_accepted * stats["end_as_in_path"]:6.2f}%')
     print(f'       Single AS: {stats["single_as"]:7d} '
           f'{p_total * stats["single_as"]:6.2f}% '
           f'{p_accepted * stats["single_as"]:6.2f}%')
