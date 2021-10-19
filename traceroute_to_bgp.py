@@ -298,10 +298,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('config')
     parser.add_argument('-s', '--start', help='Start timestamp (as UNIX epoch '
-                                              'in seconds or milliseconds, or'
+                                              'in seconds or milliseconds, or '
                                               'in YYYY-MM-DDThh:mm format)')
     parser.add_argument('-e', '--stop', help='Stop timestamp (as UNIX epoch '
-                                             'in seconds or milliseconds, or'
+                                             'in seconds or milliseconds, or '
                                              'in YYYY-MM-DDThh:mm format)')
     # Logging
     FORMAT = '%(asctime)s %(processName)s %(message)s'
@@ -368,7 +368,11 @@ def main() -> None:
     seen_peer_prefixes = set()
     reader = KafkaReader([traceroute_kafka_topic], bootstrap_servers,
                          start * 1000, stop * 1000)
-    writer = KafkaWriter(output_kafka_topic, bootstrap_servers)
+    writer = KafkaWriter(output_kafka_topic,
+                         bootstrap_servers,
+                         num_partitions=10,
+                         # 2 months
+                         config={'retention.ms': 5184000000})
     with reader, writer:
         for msg in reader.read():
             data = process_message(msg, lookup, seen_peer_prefixes,
@@ -378,7 +382,10 @@ def main() -> None:
             writer.write(None, data, unified_timestamp * 1000)
     # Fake entry to force dump
     update_writer = KafkaWriter(output_kafka_topic_prefix + '_updates',
-                                bootstrap_servers)
+                                bootstrap_servers,
+                                num_partitions=10,
+                                # 2 months
+                                config={'retention.ms': 5184000000})
     with update_writer:
         fake = {'rec': {'time': unified_timestamp + 1},
                 'elements': [{
@@ -393,7 +400,10 @@ def main() -> None:
                 }
         update_writer.write(None, fake, (unified_timestamp + 1) * 1000)
     stats_writer = KafkaWriter(output_kafka_topic_prefix + '_stats',
-                               bootstrap_servers)
+                               bootstrap_servers,
+                               num_partitions=10,
+                               # 2 months
+                               config={'retention.ms': 5184000000})
     with stats_writer:
         # Convert set to list so that msgpack does not explode.
         msm_id_list = list()
