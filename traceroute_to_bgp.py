@@ -1,6 +1,8 @@
 import argparse
+import bz2
 import configparser
 import logging
+import pickle
 import sys
 from datetime import datetime
 
@@ -129,8 +131,10 @@ def process_message(msg: dict,
                     seen_peer_prefixes: set,
                     unified_timestamp: int,
                     msm_ids=None,
+                    probe_ids=None,
                     target_asn=None) -> dict:
-    if msm_ids is not None and msg['msm_id'] not in msm_ids:
+    if msm_ids is not None and msg['msm_id'] not in msm_ids \
+        or probe_ids is not None and msg['prb_id'] not in probe_ids:
         return dict()
     stats['total'] += 1
     dst_addr = atlas_api_helper.get_dst_addr(msg)
@@ -294,6 +298,21 @@ def print_stats() -> None:
     print(f'          Scopes: {len(stats["scopes"]):7d}')
 
 
+def read_probes(probes: str) -> set:
+    if probes.endswith('.pickle.bz2'):
+        logging.info(f'Reading prb_ids from object {probes}')
+        with bz2.open(probes, 'rb') as f:
+            ret = pickle.load(f)
+        if not isinstance(ret, set):
+            logging.error(f'Specified probes object is not a set: {ret}')
+            return set()
+    else:
+        logging.info(f'Reading prb_ids from CSV string: {probes}')
+        ret = set(probes.split(','))
+    logging.info(f'Read {len(ret)} probes')
+    return ret
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('config')
@@ -346,6 +365,13 @@ def main() -> None:
         msm_ids = set(map(int, msm_ids.split(',')))
         logging.info('Filtering for msm ids: {}'.format(msm_ids))
     target_asn = config.getint('input', 'target_asn', fallback=None)
+    prb_ids = config.get('input', 'prb_ids', fallback=None)
+    if prb_ids is not None:
+        prb_ids = read_probes(prb_ids)
+        if len(prb_ids) == 0:
+            logging.warning(f'Specified prb_ids parameter resulted in an empty '
+                            f'set. Ignoring filter.')
+            prb_ids = None
     if not target_asn:
         target_asn = None
     if target_asn is not None:
@@ -376,7 +402,8 @@ def main() -> None:
     with reader, writer:
         for msg in reader.read():
             data = process_message(msg, lookup, seen_peer_prefixes,
-                                   unified_timestamp, msm_ids, target_asn)
+                                   unified_timestamp, msm_ids, prb_ids,
+                                   target_asn)
             if not data:
                 continue
             writer.write(None, data, unified_timestamp * 1000)
