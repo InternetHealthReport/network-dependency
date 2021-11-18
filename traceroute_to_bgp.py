@@ -81,6 +81,13 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
                       .format(msg))
         stats['dnf'] += 1
         return True
+    if hop['hop'] == 255:
+        # Always interpret hop 255 as timeout. Some probes claim to
+        # reach the target at hop 255 without any previous replies,
+        # which is obviously not true.
+        path.append(0, '*')
+        path.flag_too_many_hops()
+        return False
     if len(reply_addresses) > 1:
         logging.debug('Responses from different sources: {}.'
                       .format(reply_addresses))
@@ -113,8 +120,6 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         address = reply_addresses.pop()
         if address == '*':
             path.append(0, '*')
-            if hop['hop'] == 255:
-                path.flag_too_many_hops()
         else:
             ixp = lookup.ip2ixpid(address)
             if ixp != 0:
