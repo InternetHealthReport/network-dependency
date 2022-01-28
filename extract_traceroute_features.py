@@ -4,7 +4,8 @@ import logging
 import os
 import sys
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from itertools import permutations
 from typing import Any
 
 import numpy as np
@@ -16,6 +17,7 @@ from network_dependency.utils.helper_functions import check_key, check_keys, \
 
 
 DATE_FMT = '%Y-%m-%dT%H:%M'
+DATE_FMT_SHORT = '%Y-%m-%d'
 DATA_SUFFIX = '.csv.gz'
 DATA_DELIMITER = ','
 AS_HOPS_FEATURE = 'as_hops'
@@ -59,6 +61,7 @@ def check_config(config_path: str) -> configparser.ConfigParser:
 def read_probe_asns(asn_file: str) -> set:
     with open(asn_file, 'r') as f:
         return {int(l.strip().split(',')[0]) for l in f.readlines()[1:]}
+
 
 def get_source_identifier(msg: dict, mode: str) -> Any:
     if mode == AS_MODE:
@@ -206,15 +209,88 @@ def extract_rtts(msg: dict, rtts: dict, mode: str) -> None:
             rtts[src_id][dst_asn] = rtt
 
 
+def filter_by_peers(day_values: dict, peer_ids: set) -> None:
+    if not peer_ids:
+        return
+
+    for feature in day_values:
+        day_values[feature] = \
+            {peer: {dst: day_values[feature][peer][dst]
+                    for dst in peer_ids
+                    if dst in day_values[feature][peer]}
+            for peer in peer_ids}
+
+
+def process_window(daily_values: dict,
+                   window_start: datetime,
+                   window_end: datetime,
+                   peer_ids: set) -> dict:
+    curr_day = window_start
+    curr_ts = int(curr_day.timestamp())
+    window_data = daily_values[curr_ts]
+    filter_by_peers(window_data, peer_ids)
+
+    curr_day += timedelta(days=1)
+    while curr_day < window_end:
+        curr_ts = int(curr_day.timestamp())
+        for feature in window_data:
+            if peer_ids:
+                for peer, dst in permutations(peer_ids, 2):
+                    curr_val = None
+                    if dst in window_data[feature][peer]:
+                        curr_val = window_data[feature][peer][dst]
+                    other_val = None
+                    if dst in daily_values[curr_ts][feature][peer]:
+                        other_val = daily_values[curr_ts][feature][peer][dst]
+                    if curr_val is None and other_val is not None \
+                      or curr_val is not None and other_val is not None \
+                      and other_val < curr_val:
+                        window_data[feature][peer][dst] = other_val
+            else:
+                for peer in window_data[feature]:
+                    # Check for all destinations from peer that are
+                    # in the window if they have a daily value and if
+                    # that value is smaller.
+                    for dst, curr_val in window_data[feature][peer].items():
+                        if dst in daily_values[curr_ts][feature][peer] and \
+                          daily_values[curr_ts][feature][peer][dst] < curr_val:
+                            window_data[feature][peer][dst] = \
+                              daily_values[curr_ts][feature][peer][dst]
+                    # Possible destinations from peer that are not
+                    # currently in the window_data.
+                    for dst in daily_values[curr_ts][feature][peer].keys() \
+                      - window_data[feature][peer].keys():
+                        window_data[feature][peer][dst] = \
+                          daily_values[curr_ts][feature][peer][dst]
+                # Possible peers that are not currently in the
+                # window_data
+                for peer in daily_values[curr_ts][feature].keys() \
+                  - window_data[feature].keys():
+                    window_data[feature][peer] = \
+                      daily_values[curr_ts][feature][peer]
+        curr_day += timedelta(days=1)
+    return window_data
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('config')
-    parser.add_argument('-s', '--start', help='Start timestamp (as UNIX epoch '
-                                              'in seconds or milliseconds, or '
-                                              'in YYYY-MM-DDThh:mm format)')
-    parser.add_argument('-e', '--stop', help='Stop timestamp (as UNIX epoch '
-                                             'in seconds or milliseconds, or '
-                                             'in YYYY-MM-DDThh:mm format)')
+    parser.add_argument('-s', '--start',
+                        help='Start timestamp (as UNIX epoch in seconds or '
+                             'milliseconds, or in YYYY-MM-DDThh:mm format)')
+    parser.add_argument('-e', '--stop',
+                        help='Stop timestamp (as UNIX epoch in seconds or '
+                             'milliseconds, or in YYYY-MM-DDThh:mm format)')
+    window_desc = """Apply a sliding window over the specified time interval.
+                     The window length is specified in days with the
+                     --window-length parameter, the amount of days to slide
+                     the window each iteration with --window-slide-offset."""
+    window_options = parser.add_argument_group(title='Sliding Window',
+                                               description=window_desc)
+    window_options.add_argument('--window-length', type=int,
+                                help='window length in days')
+    window_options.add_argument('--window-slide-offset', type=int,
+                                help='slide offset in days')
     args = parser.parse_args()
 
     log_fmt = '%(asctime)s %(levelname)s %(message)s'
@@ -230,6 +306,14 @@ def main() -> None:
     config = check_config(args.config)
     if not config.sections():
         sys.exit(1)
+
+    if args.window_length is None and args.window_slide_offset is not None \
+        or args.window_length is not None and args.window_slide_offset is None:
+        logging.error('Window mode requires both --window-length and '
+                      '--window-slide-offset parameters.')
+        sys.exit(1)
+    window_length = args.window_length
+    window_offset = args.window_slide_offset
 
     peer_ids = None
     peer_id_file = config.get('options', 'peer_id_file', fallback=None)
@@ -250,8 +334,10 @@ def main() -> None:
         start_ts *= 1000
 
     end_ts = OFFSET_END
+    read_to_end = True
     end_ts_arg = args.stop
     if end_ts_arg:
+        read_to_end = False
         end_ts = parse_timestamp_argument(end_ts_arg)
         if end_ts == 0:
             logging.error(f'Invalid end timestamp specified: {end_ts_arg}')
@@ -262,68 +348,114 @@ def main() -> None:
 
     mode = config.get('options', 'mode')
     enabled_features = config.getcsv('options', 'enabled_features')
-    feature_values = {feature: defaultdict(dict) for feature in enabled_features}
+    daily_feature_values = \
+      defaultdict(lambda: {feature: defaultdict(dict)
+                           for feature in enabled_features})
     input_topic = config.get('input', 'kafka_topic')
 
     reader = KafkaReader([input_topic],
                          config.get('kafka', 'bootstrap_servers'),
                          start_ts,
                          end_ts)
+    if start_ts != OFFSET_BEGINNING:
+        start_ts //= 1000
+    if end_ts != OFFSET_END:
+        end_ts //= 1000
+    # First, read the entire time interval. If no window is
+    # specified, use a placeholder day value.
+    logging.info('Reading entire time interval.')
+    day = 0
     with reader:
         for msg in reader.read():
+            if start_ts == OFFSET_BEGINNING:
+                start_ts = msg['timestamp']
+            if read_to_end:
+                end_ts = msg['timestamp']
+            if window_length:
+                day = int(datetime.fromtimestamp(msg['timestamp'],
+                                                 tz=timezone.utc) \
+                                  .replace(hour=0, minute=0, second=0) \
+                                  .timestamp())
             if AS_HOPS_FEATURE in enabled_features:
-                extract_as_hops(msg, feature_values[AS_HOPS_FEATURE], mode)
+                extract_as_hops(msg,
+                                daily_feature_values[day][AS_HOPS_FEATURE],
+                                mode)
             if IP_HOPS_FEATURE in enabled_features:
-                extract_ip_hops(msg, feature_values[IP_HOPS_FEATURE], mode)
+                extract_ip_hops(msg,
+                                daily_feature_values[day][IP_HOPS_FEATURE],
+                                mode)
             if RTT_FEATURE in enabled_features:
-                extract_rtts(msg, feature_values[RTT_FEATURE], mode)
-    if peer_ids:
-        # Filter by peer identifier set.
-        for feature in enabled_features:
-            feature_values[feature] = \
-                {peer: {dst: feature_values[feature][peer][dst]
-                        for dst in peer_ids
-                        if dst in feature_values[feature][peer]}
-                for peer in peer_ids}
+                extract_rtts(msg,
+                             daily_feature_values[day][RTT_FEATURE],
+                             mode)
+
+    windows = list()
+    window_start = datetime.fromtimestamp(start_ts, tz=timezone.utc) \
+                           .replace(hour=0, minute=0, second=0)
+    last_window_end = datetime.fromtimestamp(end_ts, tz=timezone.utc) \
+                              .replace(hour=0, minute=0, second=0)
+    if window_length:
+        window_end = window_start + timedelta(days=window_length)
+        while window_end <= last_window_end:
+            logging.info(f'Processing window {window_start.strftime(DATE_FMT)}'
+                         f' -- {window_end.strftime(DATE_FMT)}')
+            windows.append((window_start,
+                            window_end,
+                            process_window(daily_feature_values,
+                                           window_start,
+                                           window_end,
+                                           peer_ids)))
+            window_start += timedelta(days=window_offset)
+            window_end += timedelta(days=window_offset)
+    else:
+        filter_by_peers(daily_feature_values[day], peer_ids)
+        windows.append((window_start,
+                        last_window_end,
+                        daily_feature_values[day]))
 
     output_path = config.get('output', 'path')
     if not output_path.endswith('/'):
         output_path += '/'
-    os.makedirs(output_path, exist_ok=True)
 
-    for feature in enabled_features:
-        logging.info(f'Processing feature: {feature}')
-        connections_sparse = feature_values[feature]
-        asns = list(connections_sparse.keys())
-        asns.sort()
-        asn_idx = {asn: idx for idx, asn in enumerate(asns)}
-        num_asns = len(asns)
-        logging.info(f'Creating {num_asns} x {num_asns} array.')
-        connections_full = np.zeros((num_asns, num_asns))
-        total_entries = num_asns * num_asns
-        entry_count = 0
-        for peer in asns:
-            for dst in connections_sparse[peer]:
-                entry_count += 1
-                connections_full[asn_idx[peer], asn_idx[dst]] = \
-                    connections_sparse[peer][dst]
-        fill_percentage = entry_count / total_entries * 100
-        logging.info(f'Filled {entry_count}/{total_entries} '
-                     f'({fill_percentage:.2f}%) entries')
-        output_file = f'{output_path}{input_topic}.{feature}{DATA_SUFFIX}'
-        logging.info(f'Writing output to file: {output_file}')
-        if feature == RTT_FEATURE:
-            np.savetxt(output_file,
-                       connections_full,
-                       '%f',
-                       delimiter=DATA_DELIMITER,
-                       header=DATA_DELIMITER.join(map(str, asns)))
-        else:
-            np.savetxt(output_file,
-                       connections_full,
-                       '%d',
-                       delimiter=DATA_DELIMITER,
-                       header=DATA_DELIMITER.join(map(str, asns)))
+    for curr_window_start, curr_window_end, feature_values in windows:
+        curr_output_path = \
+          f'{output_path}{curr_window_start.strftime(DATE_FMT_SHORT)}' \
+          f'--{curr_window_end.strftime(DATE_FMT_SHORT)}/'
+        os.makedirs(curr_output_path, exist_ok=True)
+        for feature in enabled_features:
+            logging.info(f'Processing feature: {feature}')
+            connections_sparse = feature_values[feature]
+            asns = list(connections_sparse.keys())
+            asns.sort()
+            asn_idx = {asn: idx for idx, asn in enumerate(asns)}
+            num_asns = len(asns)
+            logging.info(f'Creating {num_asns} x {num_asns} array.')
+            connections_full = np.zeros((num_asns, num_asns))
+            total_entries = num_asns * num_asns
+            entry_count = 0
+            for peer in asns:
+                for dst in connections_sparse[peer]:
+                    entry_count += 1
+                    connections_full[asn_idx[peer], asn_idx[dst]] = \
+                        connections_sparse[peer][dst]
+            fill_percentage = entry_count / total_entries * 100
+            logging.info(f'Filled {entry_count}/{total_entries} '
+                        f'({fill_percentage:.2f}%) entries')
+            output_file = \
+              f'{curr_output_path}{input_topic}.{feature}{DATA_SUFFIX}'
+            logging.info(f'Writing output to file: {output_file}')
+            if feature == RTT_FEATURE:
+                np.savetxt(output_file,
+                        connections_full,
+                        '%f',
+                        delimiter=DATA_DELIMITER,
+                        header=DATA_DELIMITER.join(map(str, asns)))
+            else:
+                np.savetxt(output_file,
+                        connections_full,
+                        '%d',
+                        delimiter=DATA_DELIMITER,
+                        header=DATA_DELIMITER.join(map(str, asns)))
 
 
 if __name__ == '__main__':
