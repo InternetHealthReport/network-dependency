@@ -287,7 +287,7 @@ def main() -> None:
                      the window each iteration with --window-slide-offset."""
     window_options = parser.add_argument_group(title='Sliding Window',
                                                description=window_desc)
-    window_options.add_argument('--window-length', type=int,
+    window_options.add_argument('--window-length', type=int, nargs='+',
                                 help='window length in days')
     window_options.add_argument('--window-slide-offset', type=int,
                                 help='slide offset in days')
@@ -312,7 +312,7 @@ def main() -> None:
         logging.error('Window mode requires both --window-length and '
                       '--window-slide-offset parameters.')
         sys.exit(1)
-    window_length = args.window_length
+    window_lengths = args.window_length
     window_offset = args.window_slide_offset
 
     peer_ids = None
@@ -371,7 +371,7 @@ def main() -> None:
                 start_ts = msg['timestamp']
             if read_to_end:
                 end_ts = msg['timestamp']
-            if window_length:
+            if window_lengths:
                 day = int(datetime.fromtimestamp(msg['timestamp'],
                                                  tz=timezone.utc) \
                                   .replace(hour=0, minute=0, second=0) \
@@ -389,73 +389,85 @@ def main() -> None:
                              daily_feature_values[day][RTT_FEATURE],
                              mode)
 
-    windows = list()
-    window_start = datetime.fromtimestamp(start_ts, tz=timezone.utc) \
+    windows = defaultdict(list)
+    first_window_start = datetime.fromtimestamp(start_ts, tz=timezone.utc) \
                            .replace(hour=0, minute=0, second=0)
     last_window_end = datetime.fromtimestamp(end_ts, tz=timezone.utc) \
                               .replace(hour=0, minute=0, second=0)
-    if window_length:
-        window_end = window_start + timedelta(days=window_length)
-        while window_end <= last_window_end:
-            logging.info(f'Processing window {window_start.strftime(DATE_FMT)}'
-                         f' -- {window_end.strftime(DATE_FMT)}')
-            windows.append((window_start,
-                            window_end,
-                            process_window(daily_feature_values,
-                                           window_start,
-                                           window_end,
-                                           peer_ids)))
-            window_start += timedelta(days=window_offset)
-            window_end += timedelta(days=window_offset)
+    if window_lengths:
+        for window_length in window_lengths:
+            window_start = first_window_start
+            window_end = window_start + timedelta(days=window_length)
+            while window_end <= last_window_end:
+                logging.info(f'Processing window '
+                             f'{window_start.strftime(DATE_FMT)}'
+                             f' -- {window_end.strftime(DATE_FMT)}')
+                windows[window_length]\
+                  .append((window_start,
+                           window_end,
+                           process_window(daily_feature_values,
+                                          window_start,
+                                          window_end,
+                                          peer_ids)))
+                window_start += timedelta(days=window_offset)
+                window_end += timedelta(days=window_offset)
     else:
         filter_by_peers(daily_feature_values[day], peer_ids)
-        windows.append((window_start,
-                        last_window_end,
-                        daily_feature_values[day]))
+        windows[None].append((window_start,
+                              last_window_end,
+                              daily_feature_values[day]))
 
     output_path = config.get('output', 'path')
     if not output_path.endswith('/'):
         output_path += '/'
 
-    for curr_window_start, curr_window_end, feature_values in windows:
-        curr_output_path = \
-          f'{output_path}{curr_window_start.strftime(DATE_FMT_SHORT)}' \
-          f'--{curr_window_end.strftime(DATE_FMT_SHORT)}/'
-        os.makedirs(curr_output_path, exist_ok=True)
-        for feature in enabled_features:
-            logging.info(f'Processing feature: {feature}')
-            connections_sparse = feature_values[feature]
-            asns = list(connections_sparse.keys())
-            asns.sort()
-            asn_idx = {asn: idx for idx, asn in enumerate(asns)}
-            num_asns = len(asns)
-            logging.info(f'Creating {num_asns} x {num_asns} array.')
-            connections_full = np.zeros((num_asns, num_asns))
-            total_entries = num_asns * num_asns
-            entry_count = 0
-            for peer in asns:
-                for dst in connections_sparse[peer]:
-                    entry_count += 1
-                    connections_full[asn_idx[peer], asn_idx[dst]] = \
-                        connections_sparse[peer][dst]
-            fill_percentage = entry_count / total_entries * 100
-            logging.info(f'Filled {entry_count}/{total_entries} '
-                        f'({fill_percentage:.2f}%) entries')
-            output_file = \
-              f'{curr_output_path}{input_topic}.{feature}{DATA_SUFFIX}'
-            logging.info(f'Writing output to file: {output_file}')
-            if feature == RTT_FEATURE:
-                np.savetxt(output_file,
-                        connections_full,
-                        '%f',
-                        delimiter=DATA_DELIMITER,
-                        header=DATA_DELIMITER.join(map(str, asns)))
+    for curr_window_length, curr_windows in windows.items():
+        for curr_window_start, curr_window_end, feature_values in curr_windows:
+            if curr_window_length is None:
+                curr_output_path = \
+                f'{output_path}{curr_window_start.strftime(DATE_FMT_SHORT)}' \
+                f'--{curr_window_end.strftime(DATE_FMT_SHORT)}/'
             else:
-                np.savetxt(output_file,
-                        connections_full,
-                        '%d',
-                        delimiter=DATA_DELIMITER,
-                        header=DATA_DELIMITER.join(map(str, asns)))
+                curr_output_path = \
+                f'{output_path}{curr_window_length}/' \
+                f'{curr_window_start.strftime(DATE_FMT_SHORT)}' \
+                f'--{curr_window_end.strftime(DATE_FMT_SHORT)}/'
+
+            os.makedirs(curr_output_path, exist_ok=True)
+            for feature in enabled_features:
+                logging.info(f'Processing feature: {feature}')
+                connections_sparse = feature_values[feature]
+                asns = list(connections_sparse.keys())
+                asns.sort()
+                asn_idx = {asn: idx for idx, asn in enumerate(asns)}
+                num_asns = len(asns)
+                logging.info(f'Creating {num_asns} x {num_asns} array.')
+                connections_full = np.zeros((num_asns, num_asns))
+                total_entries = num_asns * num_asns
+                entry_count = 0
+                for peer in asns:
+                    for dst in connections_sparse[peer]:
+                        entry_count += 1
+                        connections_full[asn_idx[peer], asn_idx[dst]] = \
+                            connections_sparse[peer][dst]
+                fill_percentage = entry_count / total_entries * 100
+                logging.info(f'Filled {entry_count}/{total_entries} '
+                            f'({fill_percentage:.2f}%) entries')
+                output_file = \
+                f'{curr_output_path}{input_topic}.{feature}{DATA_SUFFIX}'
+                logging.info(f'Writing output to file: {output_file}')
+                if feature == RTT_FEATURE:
+                    np.savetxt(output_file,
+                               connections_full,
+                               '%f',
+                               delimiter=DATA_DELIMITER,
+                               header=DATA_DELIMITER.join(map(str, asns)))
+                else:
+                    np.savetxt(output_file,
+                               connections_full,
+                               '%d',
+                               delimiter=DATA_DELIMITER,
+                               header=DATA_DELIMITER.join(map(str, asns)))
 
 
 if __name__ == '__main__':
