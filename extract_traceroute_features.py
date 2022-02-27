@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from itertools import permutations
 from typing import Any
 
+import psutil
 import numpy as np
 from confluent_kafka import OFFSET_BEGINNING, OFFSET_END
 
@@ -227,7 +228,7 @@ def process_window(daily_values: dict,
                    peer_ids: set) -> dict:
     curr_day = window_start
     curr_ts = int(curr_day.timestamp())
-    window_data = daily_values[curr_ts]
+    window_data = dict(daily_values[curr_ts])
     filter_by_peers(window_data, peer_ids)
 
     curr_day += timedelta(days=1)
@@ -365,6 +366,7 @@ def main() -> None:
     # specified, use a placeholder day value.
     logging.info('Reading entire time interval.')
     day = 0
+    check_count = 0
     with reader:
         for msg in reader.read():
             if start_ts == OFFSET_BEGINNING:
@@ -388,6 +390,14 @@ def main() -> None:
                 extract_rtts(msg,
                              daily_feature_values[day][RTT_FEATURE],
                              mode)
+            check_count += 1
+            if check_count >= 1000000:
+                mem_pct = psutil.virtual_memory().percent
+                logging.info(f'Memory usage: {mem_pct}%')
+                if mem_pct > 90:
+                    logging.error(f'Aborting due to too high memory usage: {psutil.virtual_memory()}')
+                    sys.exit(1)
+                check_count = 0
 
     windows = defaultdict(list)
     first_window_start = datetime.fromtimestamp(start_ts, tz=timezone.utc) \
@@ -413,7 +423,7 @@ def main() -> None:
                 window_end += timedelta(days=window_offset)
     else:
         filter_by_peers(daily_feature_values[day], peer_ids)
-        windows[None].append((window_start,
+        windows[None].append((first_window_start,
                               last_window_end,
                               daily_feature_values[day]))
 
