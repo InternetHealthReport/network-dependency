@@ -150,6 +150,8 @@ def main() -> None:
                             mask_value=0)
         selector.process()
         output_topic = output_topic_prefix + feature
+        if feature == AS_HOPS_FEATURE:
+            output_topic = output_topic_prefix + 'as_path_length'
         writer = KafkaWriter(output_topic,
                             bootstrap_servers,
                             num_partitions=10,
