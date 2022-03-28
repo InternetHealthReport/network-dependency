@@ -56,8 +56,8 @@ def generate_messages(interval_start: int,
                 asn_set.add((peer, dst))
     logging.info(f'Found {len(asn_set)} ASN pairs.')
     for peer, dst in sorted(asn_set):
-        msg = {'timestamp': interval_start,
-               'interval_end': interval_end,
+        msg = {'timestamp': interval_end,
+               'interval_start': interval_start,
                'peer': peer,
                'dst': dst,
                'features': dict()}
@@ -148,7 +148,7 @@ def main() -> None:
         for msg in generate_messages(start_ts, end_ts, feature_values):
             writer.write(msg['peer'].to_bytes(8, 'big', signed=True),
                          msg,
-                         start_ts * 1000)
+                         end_ts * 1000)
             msg_count += 1
     logging.info(f'Generated {msg_count} messages.')
 

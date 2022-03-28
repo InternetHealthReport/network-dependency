@@ -166,13 +166,13 @@ def main() -> None:
                 if line[0] is ma.masked or line[1] == str():
                     continue
                 logging.info(f'{rank} {line}')
-                msg = {'timestamp': start_ts,
+                msg = {'timestamp': end_ts,
                        'rank': rank,
                        'asn': line[1],
                        'mean': line[0]}
                 writer.write(None,
                             msg,
-                            start_ts * 1000)
+                            end_ts * 1000)
                 rank += 1
 
 
