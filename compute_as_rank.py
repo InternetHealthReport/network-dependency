@@ -64,6 +64,9 @@ def main() -> None:
                         help='Stop timestamp (as UNIX epoch in seconds or '
                              'milliseconds, or in YYYY-MM-DDThh:mm format)')
     parser.add_argument('probe_as_file')
+    parser.add_argument('--output-timestamp',
+                        help='use this timestamp instead of stop timestamp '
+                             'for output messages')
     args = parser.parse_args()
 
     log_fmt = '%(asctime)s %(levelname)s %(message)s'
@@ -96,6 +99,16 @@ def main() -> None:
         sys.exit(1)
     logging.info(f'Ending read at timestamp: {end_ts} '
         f'{datetime.utcfromtimestamp(end_ts).strftime("%Y-%m-%dT%H:%M")}')
+
+    output_ts_arg = args.output_timestamp
+    output_ts = end_ts
+    if output_ts_arg:
+        output_ts = parse_timestamp_argument(output_ts_arg)
+        if output_ts == 0:
+            logging.error(f'Invalid output timestamp specified: {output_ts_arg}')
+            sys.exit(1)
+    logging.info(f'Output timestamp: {output_ts} '
+        f'{datetime.utcfromtimestamp(output_ts).strftime("%Y-%m-%dT:%H:%M")}')
 
     probe_as_list = read_probe_as(args.probe_as_file)
     asn_idx = {asn: idx for idx, asn in enumerate(probe_as_list)}
@@ -168,13 +181,13 @@ def main() -> None:
                 if line[0] is ma.masked or line[1] == str():
                     continue
                 logging.info(f'{rank} {line}')
-                msg = {'timestamp': end_ts,
+                msg = {'timestamp': output_ts,
                        'rank': rank,
                        'asn': line[1],
                        'mean': line[0]}
                 writer.write(None,
                             msg,
-                            end_ts * 1000)
+                            output_ts * 1000)
                 rank += 1
 
 
