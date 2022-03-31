@@ -95,7 +95,7 @@ def main() -> None:
     logging.basicConfig(
         format=log_fmt,
         level=logging.INFO,
-        filename='filter_rip_topic.log',
+        filename='filter_rib_topic.log',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
     parser = argparse.ArgumentParser()
