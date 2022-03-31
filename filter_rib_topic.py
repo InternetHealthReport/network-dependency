@@ -50,9 +50,22 @@ def check_config(config_path: str) -> configparser.ConfigParser:
     return config
 
 
+def read_asn_list(asn_list: str) -> set:
+    logging.info(f'Reading AS filter from: {asn_list}')
+    with open(asn_list, 'r') as f:
+        try:
+            ret = {int(line.strip()) for line in f}
+        except ValueError as e:
+            logging.error(f'Invalid line in AS list: {e}')
+            return None
+    logging.info(f'Read {len(ret)} ASes')
+    return ret
+
+
 def filter_msg(msg: dict,
                path_attributes: dict = None,
-               excluded_path_attributes: set = None) -> (dict, int):
+               excluded_path_attributes: set = None,
+               asn_list: set = None) -> (dict, int):
     if check_keys(['rec', 'elements'], msg) \
             or check_key('time', msg['rec']):
         logging.error(f'Missing "rec", "time", or "elements" field in message: '
@@ -62,13 +75,17 @@ def filter_msg(msg: dict,
     timestamp = msg['rec']['time']
     ret['elements'] = list()
     for element in msg['elements']:
-        if check_key('fields', element) \
+        if check_keys(['peer_asn', 'fields'], element) \
                 or check_key('path-attributes', element['fields']):
-            logging.error(f'Missing "fields" or "path-attributes" field in '
-                          f'message: {msg}')
+            logging.error(f'Missing "peer_asn", "fields" or "path-attributes" '
+                          f'field in message: {msg}')
             continue
-        msg_path_attributes = element['fields']['path-attributes']
 
+        peer_asn = element['peer_asn']
+        if asn_list and peer_asn not in asn_list:
+            continue
+
+        msg_path_attributes = element['fields']['path-attributes']
         if excluded_path_attributes and \
                 excluded_path_attributes.intersection(
                     msg_path_attributes.keys()):
@@ -166,6 +183,13 @@ def main() -> None:
                                                      'excluded_path_attributes',
                                                      fallback=None))
 
+    asn_filter = None
+    asn_list = config.get('filter', 'asn_list', fallback=None)
+    if asn_list:
+        asn_filter = read_asn_list(asn_list)
+        if asn_filter is None:
+            sys.exit(1)
+
 
     bootstrap_servers = config.get('kafka', 'bootstrap_servers')
 
@@ -186,7 +210,8 @@ def main() -> None:
         for msg in rib_reader.read():
             filtered_msg, timestamp = filter_msg(msg,
                                                  path_attributes,
-                                                 excluded_path_attributes)
+                                                 excluded_path_attributes,
+                                                 asn_filter)
             if filtered_msg:
                 if last_ts > timestamp:
                     logging.warning(f'Writing out-of-order message: {last_ts} '
