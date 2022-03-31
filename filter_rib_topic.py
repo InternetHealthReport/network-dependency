@@ -160,9 +160,12 @@ def main() -> None:
                                        'path_attributes',
                                        fallback=None)
 
-    excluded_path_attributes = set(config.getcsv('filter',
-                                                 'excluded_path_attributes',
-                                                 fallback=None))
+    excluded_path_attributes = None
+    if config.get('filter', 'excluded_path_attributes', fallback=None):
+        excluded_path_attributes = set(config.getcsv('filter',
+                                                     'excluded_path_attributes',
+                                                     fallback=None))
+
 
     bootstrap_servers = config.get('kafka', 'bootstrap_servers')
 
