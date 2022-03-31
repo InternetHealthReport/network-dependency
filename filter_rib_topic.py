@@ -62,13 +62,6 @@ def filter_msg(msg: dict,
     timestamp = msg['rec']['time']
     ret['elements'] = list()
     for element in msg['elements']:
-        # TODO Remove when field name fix has permeated the topics.
-        if 'fields' in element and 'path-attributes:' in element['fields']:
-            # Fix field name
-            element['fields']['path-attributes'] = \
-                element['fields']['path-attributes:']
-            element['fields'].pop('path-attributes:')
-        # TODO END
         if check_key('fields', element) \
                 or check_key('path-attributes', element['fields']):
             logging.error(f'Missing "fields" or "path-attributes" field in '
