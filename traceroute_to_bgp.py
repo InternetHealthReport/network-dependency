@@ -211,6 +211,7 @@ def process_message(msg: dict,
                'type': 'R',
                'peer_address': msg['from'],
                'peer_asn': peer_asn,
+               'prb_id': msg['prb_id'],
                'fields': {
                    'as-path': reduced_path,
                    'ip-path': reduced_ip_path,
@@ -411,7 +412,9 @@ def main() -> None:
                                    target_asn)
             if not data:
                 continue
-            writer.write(None, data, unified_timestamp * 1000)
+            writer.write(msg['prb_id'].to_bytes(4, byteorder='big'),
+                         data,
+                         unified_timestamp * 1000)
     # Fake entry to force dump
     update_writer = KafkaWriter(output_kafka_topic_prefix + '_updates',
                                 bootstrap_servers,

@@ -65,14 +65,15 @@ def read_asn_list(asn_list: str) -> set:
 def filter_msg(msg: dict,
                path_attributes: dict = None,
                excluded_path_attributes: set = None,
-               asn_list: set = None) -> (dict, int):
+               asn_list: set = None) -> (dict, int, int):
     if check_keys(['rec', 'elements'], msg) \
             or check_key('time', msg['rec']):
         logging.error(f'Missing "rec", "time", or "elements" field in message: '
                       f'{msg}')
-        return dict(), -1
+        return dict(), -1, None
     ret = msg.copy()
     timestamp = msg['rec']['time']
+    prb_id = None
     ret['elements'] = list()
     for element in msg['elements']:
         if check_keys(['peer_asn', 'fields'], element) \
@@ -82,6 +83,13 @@ def filter_msg(msg: dict,
             continue
 
         peer_asn = element['peer_asn']
+        if check_key('prb_id', element):
+            logging.warning(f'Missing "prb_id" field in message: {msg}')
+        else:
+            if prb_id is not None:
+                logging.warning(f'Multiple elements with different probe ids in '
+                                f'message: {msg}')
+            prb_id = element['prb_id']
         if asn_list and peer_asn not in asn_list:
             continue
 
@@ -103,8 +111,8 @@ def filter_msg(msg: dict,
                 continue
         ret['elements'].append(element)
     if not ret['elements']:
-        return dict(), -1
-    return ret, timestamp
+        return dict(), -1, None
+    return ret, timestamp, prb_id
 
 
 def main() -> None:
@@ -208,15 +216,19 @@ def main() -> None:
     with rib_reader, rib_writer:
         last_ts = -1
         for msg in rib_reader.read():
-            filtered_msg, timestamp = filter_msg(msg,
-                                                 path_attributes,
-                                                 excluded_path_attributes,
-                                                 asn_filter)
+            filtered_msg, timestamp, prb_id = \
+              filter_msg(msg,
+                         path_attributes,
+                         excluded_path_attributes,
+                         asn_filter)
             if filtered_msg:
                 if last_ts > timestamp:
                     logging.warning(f'Writing out-of-order message: {last_ts} '
                                     f'> {timestamp}')
-                rib_writer.write(None, filtered_msg, timestamp * 1000)
+                key = None
+                if prb_id is not None:
+                    key = prb_id.to_bytes(4, byteorder='big')
+                rib_writer.write(key, filtered_msg, timestamp * 1000)
                 last_ts = timestamp
 
     input_updates_topic = f'ihr_bgp_{config.get("input", "collector")}_updates'
@@ -235,13 +247,18 @@ def main() -> None:
                                  num_partitions=10,
                                  # 2 months
                                  config={'retention.ms': 5184000000})
-    with updates_reader, updates_writer:
-        last_ts = -1
+    update_messages = list()
+    with updates_reader:
         for msg in updates_reader.read():
             if check_key('rec', msg) or check_key('time', msg['rec']):
                 logging.error(f'Missing "rec" or "time" field in msg {msg}')
                 continue
             timestamp = msg['rec']['time']
+            update_messages.append((timestamp, msg))
+    update_messages.sort(key=lambda t: t[0])
+    last_ts = -1
+    with updates_writer:
+        for timestamp, msg in update_messages:
             if last_ts > timestamp:
                 logging.warning(f'Writing out-of-order message: {last_ts} '
                                 f'> {timestamp}')
