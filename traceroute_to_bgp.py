@@ -328,6 +328,9 @@ def main() -> None:
     parser.add_argument('-e', '--stop', help='Stop timestamp (as UNIX epoch '
                                              'in seconds or milliseconds, or '
                                              'in YYYY-MM-DDThh:mm format)')
+    parser.add_argument('--ixp2as-timestamp',
+                        help='Start timestamp from which to reader ixp2as '
+                             'Kafka topic')
     # Logging
     FORMAT = '%(asctime)s %(processName)s %(message)s'
     logging.basicConfig(
@@ -361,6 +364,14 @@ def main() -> None:
     logging.info('Stop timestamp: {} {}'
                  .format(datetime.utcfromtimestamp(stop)
                          .strftime('%Y-%m-%dT%H:%M'), stop))
+    ixp2as_timestamp_arg = args.ixp2as_timestamp
+    ixp2as_timestamp = None
+    if ixp2as_timestamp_arg is not None:
+        ixp2as_timestamp = parse_timestamp_argument(ixp2as_timestamp_arg) * 1000
+        if ixp2as_timestamp == 0:
+            logging.error(f'Invalid ixp2as timestamp specified: {ixp2as_timestamp_arg}')
+            sys.exit(1)
+
     traceroute_kafka_topic = config.get('input', 'kafka_topic',
                                         fallback='ihr_atlas_traceroutev4')
     output_kafka_topic_prefix = config.get('output', 'kafka_topic_prefix',
@@ -396,7 +407,7 @@ def main() -> None:
                          .strftime('%Y-%m-%dT%H:%M'), unified_timestamp))
     bootstrap_servers = config.get('kafka', 'bootstrap_servers')
 
-    lookup = IPLookup(config)
+    lookup = IPLookup(config, ixp2as_timestamp)
     seen_peer_prefixes = set()
     reader = KafkaReader([traceroute_kafka_topic], bootstrap_servers,
                          start * 1000, stop * 1000)

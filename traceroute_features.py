@@ -179,6 +179,9 @@ def main() -> None:
     parser.add_argument('--input-list',
                         help='specify list of input files if file-input mode '
                              'is used')
+    parser.add_argument('--ixp2as-timestamp',
+                        help='Start timestamp from which to reader ixp2as '
+                             'Kafka topic')
     FORMAT = '%(asctime)s %(levelname)s %(message)s'
     logging.basicConfig(
         format=FORMAT, filename='traceroute_features.log',
@@ -211,6 +214,14 @@ def main() -> None:
     logging.info(f'Stop timestamp: '
                  f'{datetime.utcfromtimestamp(stop_ts).strftime(DATE_FMT)} '
                  f'{stop_ts}')
+
+    ixp2as_timestamp_arg = args.ixp2as_timestamp
+    ixp2as_timestamp = None
+    if ixp2as_timestamp_arg is not None:
+        ixp2as_timestamp = parse_timestamp_argument(ixp2as_timestamp_arg) * 1000
+        if ixp2as_timestamp == 0:
+            logging.error(f'Invalid ixp2as timestamp specified: {ixp2as_timestamp_arg}')
+            sys.exit(1)
 
     bootstrap_servers = config.get('kafka', 'bootstrap_servers')
     input_mode = config.get('input', 'mode')
@@ -249,7 +260,7 @@ def main() -> None:
 
     output_topic = config.get('output', 'kafka_topic')
 
-    lookup = IPLookup(config)
+    lookup = IPLookup(config, ixp2as_timestamp)
     writer = KafkaWriter(output_topic,
                          bootstrap_servers,
                          num_partitions=10,

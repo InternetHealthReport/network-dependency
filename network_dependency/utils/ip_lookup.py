@@ -5,6 +5,7 @@ import pickle
 import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from socket import AF_INET, AF_INET6
 
 import radix
@@ -35,7 +36,9 @@ class IPLookup:
     Kafka topic.
     """
 
-    def __init__(self, config: configparser.ConfigParser):
+    def __init__(self,
+                 config: configparser.ConfigParser,
+                 ip2ixp_read_ts: int = None):
         # ip2asn initialization.
         ip2asn_dir = config.get('ip2asn', 'path')
         ip2asn_db = config.get('ip2asn', 'db',
@@ -60,12 +63,14 @@ class IPLookup:
                                               'localhost:9092')
         self.ixp_rtree = radix.Radix()
         self.__build_ixp_rtree_from_kafka(ip2ixp_ix_kafka_topic,
-                                          ip2ixp_bootstrap_servers)
+                                          ip2ixp_bootstrap_servers,
+                                          ip2ixp_read_ts)
         self.ixp_asn_dict = dict()
         self.ixp_ipv4_asns = defaultdict(Prefixes)
         self.ixp_ipv6_asns = defaultdict(Prefixes)
         self.__fill_ixp_asn_dict_from_kafka(ip2ixp_netixlan_kafka_topic,
-                                            ip2ixp_bootstrap_servers)
+                                            ip2ixp_bootstrap_servers,
+                                            ip2ixp_read_ts)
 
     def __build_asn_sets_from_radix(self, db: str):
         with bz2.open(db, 'rb') as f:
@@ -89,8 +94,16 @@ class IPLookup:
                 logging.warning(f'Unknown protocol family {node.family} for '
                                 f'node {node}')
 
-    def __build_ixp_rtree_from_kafka(self, topic: str, bootstrap_servers: str):
-        reader = KafkaReader([topic], bootstrap_servers)
+    def __build_ixp_rtree_from_kafka(self,
+                                     topic: str,
+                                     bootstrap_servers: str,
+                                     start_ts: int):
+        if start_ts:
+            reader = KafkaReader([topic], bootstrap_servers, start_ts)
+        else:
+            reader = KafkaReader([topic], bootstrap_servers)
+        ix_id_set = set()
+        prefix_set = set()
         with reader:
             for val in reader.read():
                 if 'prefix' not in val \
@@ -102,10 +115,18 @@ class IPLookup:
                 node = self.ixp_rtree.add(val['prefix'])
                 node.data['name'] = val['name']
                 node.data['id'] = val['ix_id']
+                ix_id_set.add(val['ix_id'])
+                prefix_set.add(val['prefix'])
+        logging.info(f'Loaded {len(ix_id_set)} IXPs with {len(prefix_set)} prefixes')
 
-    def __fill_ixp_asn_dict_from_kafka(self, topic: str,
-                                       bootstrap_servers: str):
-        reader = KafkaReader([topic], bootstrap_servers)
+    def __fill_ixp_asn_dict_from_kafka(self,
+                                       topic: str,
+                                       bootstrap_servers: str,
+                                       start_ts: int):
+        if start_ts:
+            reader = KafkaReader([topic], bootstrap_servers, start_ts)
+        else:
+            reader = KafkaReader([topic], bootstrap_servers)
         with reader:
             for val in reader.read():
                 if 'ipaddr4' not in val or 'ipaddr6' not in val \
@@ -140,6 +161,7 @@ class IPLookup:
                         self.ixp_ipv6_asns[curr_as].prefix_count -= 1
                         self.ixp_ipv6_asns[curr_as].prefix_ip_sum -= 1
                     self.ixp_asn_dict[val['ipaddr6']] = asn
+        logging.info(f'Loaded {len(self.ixp_asn_dict)} IXP IP -> AS mappings')
 
     def ip2asn(self, ip: str) -> int:
         """Find the ASN corresponding to the given IP address."""
