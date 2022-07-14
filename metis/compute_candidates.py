@@ -5,6 +5,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime
 
+sys.path.append('../')
 from network_dependency.kafka.kafka_reader import KafkaReader
 from network_dependency.kafka.kafka_writer import KafkaWriter
 from network_dependency.utils.helper_functions import parse_timestamp_argument

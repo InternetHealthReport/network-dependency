@@ -7,6 +7,7 @@ from datetime import datetime
 import numpy as np
 import numpy.ma as ma
 
+sys.path.append('../')
 from network_dependency.kafka.kafka_reader import KafkaReader
 from network_dependency.kafka.kafka_writer import KafkaWriter
 from network_dependency.utils.helper_functions import parse_timestamp_argument
