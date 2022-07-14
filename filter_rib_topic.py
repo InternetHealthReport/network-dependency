@@ -53,11 +53,7 @@ def check_config(config_path: str) -> configparser.ConfigParser:
 def read_asn_list(asn_list: str) -> set:
     logging.info(f'Reading AS filter from: {asn_list}')
     with open(asn_list, 'r') as f:
-        try:
-            ret = {int(line.strip()) for line in f}
-        except ValueError as e:
-            logging.error(f'Invalid line in AS list: {e}')
-            return None
+        ret = {line.strip() for line in f}
     logging.info(f'Read {len(ret)} ASes')
     return ret
 

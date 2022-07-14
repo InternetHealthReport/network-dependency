@@ -163,14 +163,14 @@ class IPLookup:
                     self.ixp_asn_dict[val['ipaddr6']] = asn
         logging.info(f'Loaded {len(self.ixp_asn_dict)} IXP IP -> AS mappings')
 
-    def ip2asn(self, ip: str) -> int:
+    def ip2asn(self, ip: str) -> str:
         """Find the ASN corresponding to the given IP address."""
         asn = self.i2asn.ip2asn(ip)
         if asn != 0:
-            return asn
+            return str(asn)
         if ip in self.ixp_asn_dict:
-            return self.ixp_asn_dict[ip]
-        return 0
+            return str(self.ixp_asn_dict[ip])
+        return '0'
 
     def ip2ixpname(self, ip: str) -> str:
         """Find the IXP name corresponding to the given IP address."""

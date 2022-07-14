@@ -146,7 +146,7 @@ def main() -> None:
     msg_count = 0
     with writer:
         for msg in generate_messages(start_ts, end_ts, feature_values):
-            writer.write(msg['peer'].to_bytes(8, 'big', signed=True),
+            writer.write(msg['peer'],
                          msg,
                          end_ts * 1000)
             msg_count += 1

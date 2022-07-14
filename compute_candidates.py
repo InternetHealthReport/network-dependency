@@ -45,7 +45,7 @@ def read_probe_as(probe_as_file: str) -> set:
     with open(probe_as_file, 'r') as f:
         f.readline()
         for line in f:
-            asn = int(line.split(DATA_DELIMITER, maxsplit=1)[0])
+            asn = line.split(DATA_DELIMITER, maxsplit=1)[0]
             ret.add(asn)
     return ret
 
@@ -172,6 +172,11 @@ def main() -> None:
                 num_samples = len(samples)
                 mean = sum(samples) / num_samples
                 logging.info(f'{rank} {asn} {mean} {num_samples}')
+                try:
+                    asn = int(asn)
+                except ValueError as e:
+                    logging.error(f'Skipping AS {asn}: {e}')
+                    continue
                 msg = {'timestamp': output_ts,
                        'rank': rank,
                        'asn': asn,

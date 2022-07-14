@@ -85,7 +85,7 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         # Always interpret hop 255 as timeout. Some probes claim to
         # reach the target at hop 255 without any previous replies,
         # which is obviously not true.
-        path.append(0, '*')
+        path.append('0', '*')
         path.flag_too_many_hops()
         return False
     if len(reply_addresses) > 1:
@@ -108,8 +108,9 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
             ixp = lookup.ip2ixpid(address)
             if ixp != 0:
                 # We represent IXPs with negative "AS numbers".
-                as_set.append(ixp * -1)
-                ip_set.append(address)
+                as_set.append(f'-{ixp}')
+                as_set.append(f'-{ixp}_{lookup.ip2asn(address)}')
+                as_set.append(address)
                 contains_ixp = True
             as_set.append(lookup.ip2asn(address))
             ip_set.append(address)
@@ -119,12 +120,14 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
     else:
         address = reply_addresses.pop()
         if address == '*':
-            path.append(0, '*')
+            path.append('0', '*')
         else:
             ixp = lookup.ip2ixpid(address)
             if ixp != 0:
                 # We represent IXPs with negative "AS numbers".
-                path.append(ixp * -1, address, ixp=True)
+                path.append(f'-{ixp}', address, ixp=True)
+                path.append(f'-{ixp}_{lookup.ip2asn(address)}', address, ixp=True)
+                path.append(address, address, ixp=True)
             if errors_in_hop:
                 path.mark_hop_error(error_str)
             path.append(lookup.ip2asn(address), address)
@@ -147,7 +150,7 @@ def process_message(msg: dict,
         stats['no_dst_addr'] += 1
         return dict()
     dst_asn = lookup.ip2asn(dst_addr)
-    if dst_asn == 0:
+    if dst_asn == '0':
         logging.debug('Failed to look up destination AS for destination'
                       ' address {}'.format(dst_addr))
         stats['no_dst_asn'] += 1
@@ -165,7 +168,7 @@ def process_message(msg: dict,
         stats['no_from'] += 1
         return dict()
     peer_asn = lookup.ip2asn(msg['from'])
-    if peer_asn == 0:
+    if peer_asn == '0':
         logging.debug('Failed to look up peer_asn for peer_address {}'
                       .format(msg['from']))
         stats['no_peer_asn'] += 1
@@ -381,7 +384,7 @@ def main() -> None:
     if msm_ids is not None:
         msm_ids = set(map(int, msm_ids.split(',')))
         logging.info('Filtering for msm ids: {}'.format(msm_ids))
-    target_asn = config.getint('input', 'target_asn', fallback=None)
+    target_asn = config.get('input', 'target_asn', fallback=None)
     prb_ids = config.get('input', 'prb_ids', fallback=None)
     if prb_ids is not None:
         prb_ids = read_probes(prb_ids)
@@ -438,7 +441,7 @@ def main() -> None:
                     'type': 'A',
                     'time': unified_timestamp + 1,
                     'peer_address': '0.0.0.0',
-                    'peer_asn': 0,
+                    'peer_asn': '0',
                     'fields': {
                         'prefix': '0.0.0.0/0'
                     }

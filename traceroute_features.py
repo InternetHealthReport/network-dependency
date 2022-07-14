@@ -133,7 +133,7 @@ def process_hop(hop: dict, seen_ips: set, lookup: IPLookup) -> dict:
         if ixp != 0:
             ixp_hop = reply_hop.copy()
             # We represent IXPs with negative "AS numbers".
-            ixp_hop['asn'] = ixp * -1
+            ixp_hop['asn'] = str(ixp * -1)
             yield ixp_hop
 
 

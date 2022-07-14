@@ -7,15 +7,15 @@ class ASPath:
         self.ixp_nodes = list()
         self.reduced_ixp_nodes = list()
         self.reduced_ixp_nodes_updated = False
-        self.start_as = 0
-        self.end_as = 0
+        self.start_as = '0'
+        self.end_as = '0'
         self.attributes = dict()
         self.trailing_timeouts_pruned = False
 
     def __str__(self) -> str:
         return ' '.join(map(str, self.nodes))
 
-    def append(self, as_: int, ip: str = str(), ixp: bool = False) -> None:
+    def append(self, as_: str, ip: str = str(), ixp: bool = False) -> None:
         if ixp:
             self.ixp_nodes.append(len(self.nodes))
         self.nodes.append((as_, ip))
@@ -32,10 +32,10 @@ class ASPath:
         self.reduced_ixp_nodes_updated = False
         self.trailing_timeouts_pruned = False
 
-    def set_start_end_asn(self, start: int = 0, end: int = 0):
-        if start != 0:
+    def set_start_end_asn(self, start: str = '0', end: str = '0'):
+        if start != '0':
             self.start_as = start
-        if end != 0:
+        if end != '0':
             self.end_as = end
 
     def flag_too_many_hops(self) -> None:
@@ -72,7 +72,7 @@ class ASPath:
         if cutoff > 0:
             # Remove all trailing * nodes and replace them with a single
             # * node.
-            self.nodes = self.nodes[:-cutoff] + [(0, '*')]
+            self.nodes = self.nodes[:-cutoff] + [('0', '*')]
 
     def get_raw_path(self) -> (str, str):
         """Return the raw AS path as a space-separated list."""
@@ -85,10 +85,10 @@ class ASPath:
         for as_, ip in self.nodes:
             if isinstance(as_, tuple):
                 # AS Set
-                as_path.append('{' + ','.join(map(str, as_)) + '}')
+                as_path.append('{' + ','.join(as_) + '}')
                 ip_path.append('{' + ','.join(ip) + '}')
             else:
-                as_path.append(str(as_))
+                as_path.append(as_)
                 ip_path.append(ip)
         return ' '.join(as_path), ' '.join(ip_path)
 
@@ -124,7 +124,7 @@ class ASPath:
                 unknown_hops_in_set = 0
                 for sub_idx, entry in enumerate(as_):
                     # Filter duplicate and zero AS values.
-                    if entry == 0:
+                    if entry == '0':
                         unknown_hops_in_set += 1
                         continue
                     if entry in unique_as:
@@ -151,7 +151,7 @@ class ASPath:
                     unknown_hops += 1
             else:
                 # Handle normal hop.
-                if as_ == 0:
+                if as_ == '0':
                     unknown_hops += 1
                     continue
                 if as_ in unique_as:
@@ -170,7 +170,7 @@ class ASPath:
             if stats:
                 stats['empty_path'] += 1
             return str(), str(), 0
-        if self.start_as != 0 and as_path[0] != self.start_as:
+        if self.start_as != '0' and as_path[0] != self.start_as:
             if self.start_as in unique_as:
                 stats['start_as_in_path'] += 1
                 return str(), str(), 0
@@ -185,7 +185,7 @@ class ASPath:
             # Shift IXP indexes, since we added a node at the beginning
             # of the path after the index calculation.
             self.reduced_ixp_nodes = [e + 1 for e in self.reduced_ixp_nodes]
-        if self.end_as != 0 and as_path[-1] != self.end_as:
+        if self.end_as != '0' and as_path[-1] != self.end_as:
             if self.end_as in unique_as:
                 stats['end_as_in_path'] += 1
                 return str(), str(), 0
@@ -202,10 +202,10 @@ class ASPath:
         ip_path_str = list()
         for idx, as_ in enumerate(as_path):
             if isinstance(as_, tuple):
-                as_path_str.append('{' + ','.join(map(str, as_)) + '}')
+                as_path_str.append('{' + ','.join(as_) + '}')
                 ip_path_str.append('{' + ','.join(ip_path[idx]) + '}')
             else:
-                as_path_str.append(str(as_))
+                as_path_str.append(as_)
                 ip_path_str.append(ip_path[idx])
         return ' '.join(as_path_str), ' '.join(ip_path_str), len(as_path)
 

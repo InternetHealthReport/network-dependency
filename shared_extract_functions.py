@@ -31,7 +31,7 @@ def get_source_identifier(msg: dict, mode: str) -> Any:
     return None
 
 
-def build_as_path(hops: list, src_as: int) -> list:
+def build_as_path(hops: list, src_as: str) -> list:
     as_path = list()
     included_ases = {src_as}
     curr_hop = 0
@@ -40,7 +40,8 @@ def build_as_path(hops: list, src_as: int) -> list:
         if check_keys(['hop', 'asn'], hop):
             logging.warning(f'Missing "hop" or "asn" key in hop: {hop}')
             return list()
-        if hop['asn'] in included_ases or hop['asn'] <= 0:
+        if hop['asn'] in included_ases or hop['asn'].startswith('-') \
+          or hop['asn'] == '0':
             continue
         if hop['hop'] != curr_hop and curr_as_set:
             as_path.append((curr_hop, curr_as_set.copy()))
@@ -128,7 +129,7 @@ def extract_ip_hops(msg: dict, hop_counts: dict, mode: str) -> None:
                 logging.warning(f'Missing "hop" or "asn" key in hop: {dst_hop}')
                 continue
             dst_asn = dst_hop['asn']
-            if dst_asn <= 0 or peer_asn == dst_asn:
+            if dst_asn.startswith('-') or dst_asn == '0' or peer_asn == dst_asn:
                 continue
             hop_count = dst_hop['hop'] - peer_hop['hop']
             if dst_asn not in hop_counts[peer_asn]:
@@ -154,7 +155,7 @@ def extract_rtts(msg: dict, rtts: dict, mode: str) -> None:
             continue
         rtt = hop['rtt']
         dst_asn = hop['asn']
-        if dst_asn <= 0 or dst_asn == src_id:
+        if dst_asn.startswith('-') or dst_asn == '0' or dst_asn == src_id:
             continue
         if dst_asn not in rtts[src_id]:
             rtts[src_id][dst_asn] = rtt

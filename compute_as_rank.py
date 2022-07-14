@@ -48,7 +48,7 @@ def read_probe_as(probe_as_file: str) -> list:
     with open(probe_as_file, 'r') as f:
         f.readline()
         for line in f:
-            asn = int(line.split(DATA_DELIMITER, maxsplit=1)[0])
+            asn = line.split(DATA_DELIMITER, maxsplit=1)[0]
             ret.append(asn)
     ret.sort()
     return ret
@@ -181,9 +181,14 @@ def main() -> None:
                 if line[0] is ma.masked or line[1] == str():
                     continue
                 logging.info(f'{rank} {line}')
+                try:
+                    asn = int(line[1])
+                except ValueError as e:
+                    logging.error(f'Skipping AS {asn}: {e}')
+                    continue
                 msg = {'timestamp': output_ts,
                        'rank': rank,
-                       'asn': line[1],
+                       'asn': asn,
                        'mean': line[0]}
                 writer.write(None,
                             msg,
