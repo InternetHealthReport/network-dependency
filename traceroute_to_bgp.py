@@ -111,6 +111,9 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
                 as_set.append(f'-{ixp}')
                 as_set.append(f'-{ixp}_{lookup.ip2asn(address)}')
                 as_set.append(address)
+                # It is a bit stupid, but we need to keep the set
+                # sizes equal.
+                ip_set += [address] * 3
                 contains_ixp = True
             as_set.append(lookup.ip2asn(address))
             ip_set.append(address)
