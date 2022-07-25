@@ -55,12 +55,12 @@ def read_hegemony_topic(reader: KafkaReader) -> dict:
             logging.error(f'Missing one of {required_keys} in msg: {msg}')
             continue
         asn: str = msg['asn']
-        if not asn.startswith('-'):
+        scope: str = msg['scope']
+        if not asn.startswith('-') or scope == '-1':
             continue
         ix_id = int(asn.lstrip('-'))
         ret[ix_id].append((msg['hege'], msg['scope'], msg['nb_peers']))
     return ret
-
 
 
 def main() -> None:
@@ -84,7 +84,7 @@ def main() -> None:
     config = check_config(args.config)
     if not config.sections():
         sys.exit(1)
-    
+
     hegemony_topic = config.get('input', 'traceroute_topic')
     ix_topic = config.get('input', 'peeringdb_ix_topic')
     output_topic = config.get('output', 'kafka_topic')
@@ -95,18 +95,18 @@ def main() -> None:
         logging.error(f'Invalid timestamp specified: {args.timestamp}')
         sys.exit(1)
     end_ts = start_ts + 1
-    
+
     ix_reader = KafkaReader([ix_topic], bootstrap_servers)
     with ix_reader:
         ix_data = read_ix_topic(ix_reader)
-    
+
     hegemony_reader = KafkaReader([hegemony_topic],
                                   bootstrap_servers,
                                   start_ts,
                                   end_ts)
     with hegemony_reader:
         ix_dependencies = read_hegemony_topic(hegemony_reader)
-    
+
     output_writer = KafkaWriter(output_topic,
                                 bootstrap_servers,
                                 # 2 months
@@ -121,6 +121,7 @@ def main() -> None:
             data.update(ix_data[ix_id]._asdict())
             data['hege'] = ix_dependencies[ix_id]
             output_writer.write(ix_id.to_bytes(4, 'big'), data, start_ts)
+
 
 if __name__ == '__main__':
     main()
