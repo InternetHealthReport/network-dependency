@@ -4,8 +4,8 @@ import logging
 import sys
 from collections import defaultdict, namedtuple
 
-from network_dependency.kafka.kafka_reader import KafkaReader
-from network_dependency.kafka.kafka_writer import KafkaWriter
+from kafka_wrapper.kafka_reader import KafkaReader
+from kafka_wrapper.kafka_writer import KafkaWriter
 from network_dependency.utils.helper_functions import check_keys, \
     parse_timestamp_argument
 

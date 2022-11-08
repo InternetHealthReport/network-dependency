@@ -6,8 +6,8 @@ import pickle
 import sys
 from datetime import datetime
 
-from network_dependency.kafka.kafka_reader import KafkaReader
-from network_dependency.kafka.kafka_writer import KafkaWriter
+from kafka_wrapper.kafka_reader import KafkaReader
+from kafka_wrapper.kafka_writer import KafkaWriter
 from network_dependency.utils import atlas_api_helper
 from network_dependency.utils.as_path import ASPath
 from network_dependency.utils.helper_functions import convert_date_to_epoch, \

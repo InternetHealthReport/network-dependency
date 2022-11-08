@@ -2,7 +2,7 @@ import argparse
 import logging
 import os
 import sys
-from network_dependency.kafka.kafka_reader import KafkaReader
+from kafka_wrapper.kafka_reader import KafkaReader
 from network_dependency.utils.scope_statistics import ScopeStatistic
 
 if __name__ == '__main__':

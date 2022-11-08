@@ -10,7 +10,7 @@ from socket import AF_INET, AF_INET6
 
 import radix
 
-from network_dependency.kafka.kafka_reader import KafkaReader
+from kafka_wrapper.kafka_reader import KafkaReader
 
 
 @dataclass

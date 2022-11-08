@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 import logging
 import sys
 import time
-from network_dependency.kafka.kafka_reader import KafkaReader
+from kafka_wrapper.kafka_reader import KafkaReader
 from network_dependency.utils import atlas_api_helper
 from network_dependency.utils.ip_lookup import IPLookup
 

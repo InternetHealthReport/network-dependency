@@ -1,3 +1,6 @@
 [submodule "optimum_selector"]
 	path = optimum_selector
 	url = git@github.com:m-appel/optimum-selector.git
+[submodule "kafka_wrapper"]
+	path = kafka_wrapper
+	url = git@github.com:m-appel/kafka-wrapper.git

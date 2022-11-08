@@ -6,8 +6,8 @@ from collections import defaultdict
 from datetime import datetime
 
 sys.path.append('../')
-from network_dependency.kafka.kafka_reader import KafkaReader
-from network_dependency.kafka.kafka_writer import KafkaWriter
+from kafka_wrapper.kafka_reader import KafkaReader
+from kafka_wrapper.kafka_writer import KafkaWriter
 from network_dependency.utils.helper_functions import parse_timestamp_argument
 from optimum_selector.candidate_selector import calculate_scores
 from shared_extract_functions import AS_HOPS_FEATURE, VALID_FEATURES

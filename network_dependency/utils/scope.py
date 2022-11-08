@@ -1,5 +1,6 @@
 import logging
-from network_dependency.kafka.kafka_reader import KafkaReader
+
+from kafka_wrapper.kafka_reader import KafkaReader
 
 
 class Scope:

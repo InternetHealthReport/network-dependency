@@ -9,8 +9,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from network_dependency.kafka.kafka_reader import KafkaReader
-from network_dependency.kafka.kafka_writer import KafkaWriter
+from kafka_wrapper.kafka_reader import KafkaReader
+from kafka_wrapper.kafka_writer import KafkaWriter
 from network_dependency.utils.helper_functions import check_key, check_keys, \
     parse_timestamp_argument
 

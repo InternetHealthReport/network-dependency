@@ -8,8 +8,8 @@ import numpy as np
 import numpy.ma as ma
 
 sys.path.append('../')
-from network_dependency.kafka.kafka_reader import KafkaReader
-from network_dependency.kafka.kafka_writer import KafkaWriter
+from kafka_wrapper.kafka_reader import KafkaReader
+from kafka_wrapper.kafka_writer import KafkaWriter
 from network_dependency.utils.helper_functions import parse_timestamp_argument
 from shared_extract_functions import  VALID_FEATURES, AS_HOPS_FEATURE
 from optimum_selector.selector import Selector

@@ -12,7 +12,7 @@ import psutil
 from confluent_kafka import OFFSET_BEGINNING, OFFSET_END
 
 sys.path.append('../')
-from network_dependency.kafka.kafka_reader import KafkaReader
+from kafka_wrapper.kafka_reader import KafkaReader
 from network_dependency.utils.helper_functions import parse_timestamp_argument
 from shared_extract_functions import AS_HOPS_FEATURE, IP_HOPS_FEATURE, \
                                      RTT_FEATURE, VALID_FEATURES, VALID_MODES, \
