@@ -271,7 +271,10 @@ def main() -> None:
             data = process_message(msg, lookup)
             if not data:
                 continue
-            writer.write(data['prb_id'].to_bytes(4, 'big'),
+            key = data['prb_id']
+            if type(key) == int:
+                key = key.to_bytes(4, 'big')
+            writer.write(key,
                          data,
                          data['timestamp'] * 1000)
 

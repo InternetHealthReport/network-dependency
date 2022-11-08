@@ -143,7 +143,8 @@ def process_message(msg: dict,
                     unified_timestamp: int,
                     msm_ids=None,
                     probe_ids=None,
-                    target_asn=None) -> dict:
+                    target_asn=None,
+                    include_duplicates=False) -> dict:
     if msm_ids is not None and msg['msm_id'] not in msm_ids \
         or probe_ids is not None and msg['prb_id'] not in probe_ids:
         return dict()
@@ -177,7 +178,7 @@ def process_message(msg: dict,
         stats['no_peer_asn'] += 1
         return dict()
     peer_prefix_tuple = (msg['from'], prefix)
-    if peer_prefix_tuple in seen_peer_prefixes:
+    if peer_prefix_tuple in seen_peer_prefixes and not include_duplicates:
         logging.debug('Skipping duplicate result for peer {} prefix {}'
                       .format(*peer_prefix_tuple))
         stats['duplicate'] += 1
@@ -412,6 +413,8 @@ def main() -> None:
                  .format(datetime.utcfromtimestamp(unified_timestamp)
                          .strftime('%Y-%m-%dT%H:%M'), unified_timestamp))
     bootstrap_servers = config.get('kafka', 'bootstrap_servers')
+    include_duplicates = config.getboolean('input', 'include_duplicates',
+                                           fallback=False)
 
     lookup = IPLookup(config, ixp2as_timestamp)
     seen_peer_prefixes = set()
@@ -426,10 +429,13 @@ def main() -> None:
         for msg in reader.read():
             data = process_message(msg, lookup, seen_peer_prefixes,
                                    unified_timestamp, msm_ids, prb_ids,
-                                   target_asn)
+                                   target_asn, include_duplicates)
             if not data:
                 continue
-            writer.write(msg['prb_id'].to_bytes(4, byteorder='big'),
+            key = msg['prb_id']
+            if type(key) == int:
+                key = key.to_bytes(4, byteorder='big')
+            writer.write(key,
                          data,
                          unified_timestamp * 1000)
     # Fake entry to force dump
