@@ -129,7 +129,8 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
             if ixp != 0:
                 # We represent IXPs with negative "AS numbers".
                 path.append(f'-{ixp}', address, ixp=True)
-                path.append(f'-{ixp}_{lookup.ip2asn(address)}', address, ixp=True)
+                path.append(f'-{ixp}_{lookup.ip2asn(address)}',
+                            address, ixp=True)
                 path.append(address, address, ixp=True)
             if errors_in_hop:
                 path.mark_hop_error(error_str)
@@ -146,7 +147,7 @@ def process_message(msg: dict,
                     target_asn=None,
                     include_duplicates=False) -> dict:
     if msm_ids is not None and msg['msm_id'] not in msm_ids \
-        or probe_ids is not None and msg['prb_id'] not in probe_ids:
+            or probe_ids is not None and msg['prb_id'] not in probe_ids:
         return dict()
     stats['total'] += 1
     dst_addr = atlas_api_helper.get_dst_addr(msg)
@@ -374,10 +375,12 @@ def main() -> None:
     ixp2as_timestamp_arg = args.ixp2as_timestamp
     ixp2as_timestamp = None
     if ixp2as_timestamp_arg is not None:
-        ixp2as_timestamp = parse_timestamp_argument(ixp2as_timestamp_arg) * 1000
+        ixp2as_timestamp = parse_timestamp_argument(ixp2as_timestamp_arg)
         if ixp2as_timestamp == 0:
-            logging.error(f'Invalid ixp2as timestamp specified: {ixp2as_timestamp_arg}')
+            logging.error(f'Invalid ixp2as timestamp specified: '
+                          f'{ixp2as_timestamp_arg}')
             sys.exit(1)
+        ixp2as_timestamp *= 1000
 
     traceroute_kafka_topic = config.get('input', 'kafka_topic',
                                         fallback='ihr_atlas_traceroutev4')

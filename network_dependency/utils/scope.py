@@ -16,7 +16,7 @@ class Scope:
         if as_ == self.as_:
             return
         if as_ in self.hegemony_scores:
-            logging.error('Trying to add AS {} with score {} to scope {}, ' +
+            logging.error('Trying to add AS {} with score {} to scope {}, '
                           'which already contains the AS with score {}'
                           .format(as_, score, self.as_,
                                   self.hegemony_scores[as_]))
