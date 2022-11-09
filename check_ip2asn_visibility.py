@@ -10,7 +10,7 @@ from kafka_wrapper.kafka_reader import KafkaReader
 from kafka_wrapper.kafka_writer import KafkaWriter
 from network_dependency.utils.helper_functions import \
     parse_timestamp_argument, check_keys
-from network_dependency.utils.ip_lookup import IPLookup, Visibility
+from iplookup.ip_lookup import IPLookup, Visibility
 
 DATE_FMT = '%Y-%m-%dT%H:%M'
 OUTPUT_EXTENSION = '.csv'

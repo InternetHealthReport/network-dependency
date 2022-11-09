@@ -4,3 +4,6 @@
 [submodule "kafka_wrapper"]
 	path = kafka_wrapper
 	url = git@github.com:m-appel/kafka-wrapper.git
+[submodule "iplookup"]
+	path = iplookup
+	url = git@github.com:m-appel/iplookup.git

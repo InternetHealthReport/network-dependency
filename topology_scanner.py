@@ -7,7 +7,7 @@ import sys
 import time
 from kafka_wrapper.kafka_reader import KafkaReader
 from network_dependency.utils import atlas_api_helper
-from network_dependency.utils.ip_lookup import IPLookup
+from iplookup.ip_lookup import IPLookup
 
 
 def process_interval(start: datetime,

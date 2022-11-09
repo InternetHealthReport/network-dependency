@@ -12,7 +12,7 @@ from network_dependency.utils import atlas_api_helper
 from network_dependency.utils.as_path import ASPath
 from network_dependency.utils.helper_functions import convert_date_to_epoch, \
     parse_timestamp_argument
-from network_dependency.utils.ip_lookup import IPLookup
+from iplookup.ip_lookup import IPLookup
 
 stats = {'total': 0,
          'no_dst_addr': 0,

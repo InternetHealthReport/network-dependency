@@ -13,7 +13,7 @@ from kafka_wrapper.kafka_writer import KafkaWriter
 from network_dependency.utils import atlas_api_helper
 from network_dependency.utils.helper_functions import check_key, \
                                                       parse_timestamp_argument
-from network_dependency.utils.ip_lookup import IPLookup
+from iplookup.ip_lookup import IPLookup
 
 
 DATE_FMT = '%Y-%m-%dT%H:%M'

@@ -9,7 +9,7 @@ from confluent_kafka import Consumer, Producer, TopicPartition, KafkaException
 from confluent_kafka.admin import AdminClient, NewTopic
 
 from network_dependency.utils import atlas_api_helper
-from network_dependency.utils.ip_lookup import IPLookup
+from iplookup.ip_lookup import IPLookup
 
 BOOTSTRAP_SERVERS = 'kafka1:9092,kafka2:9092,kafka3:9092'
 IN_TOPIC = 'ihr_atlas_traceroutev4'
