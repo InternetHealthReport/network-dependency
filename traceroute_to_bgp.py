@@ -43,6 +43,7 @@ probe_ip_map = dict()
 def parse_csv_int(value: str) -> list:
     return list(map(int, value.split(',')))
 
+
 def check_config(config_file: str) -> configparser.ConfigParser:
     config = configparser.ConfigParser(converters={'csvint': parse_csv_int})
     config.read(config_file)
@@ -65,8 +66,7 @@ def check_config(config_file: str) -> configparser.ConfigParser:
 def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
     if 'error' in hop:
         # Packet send failed.
-        logging.debug('Traceroute did not reach destination: {}'
-                      .format(msg))
+        logging.debug(f'Traceroute did not reach destination: {msg}')
         stats['dnf'] += 1
         return True
     replies = hop['result']
@@ -84,23 +84,21 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
                 and path.contains_ip(reply['from']):
             # Reply received with ICMP error (e.g., network unreachable)
             # We allow this reply once, if the IP was not seen before.
-            logging.debug(f'Skipping erroneous reply with existing IP: '
-                          f'{msg}')
+            logging.debug(f'Skipping erroneous reply with existing IP: {msg}')
             continue
         if 'x' in reply:
             # Timeout
             reply_addresses.add('*')
             continue
         if 'from' not in reply:
-            logging.debug('No "from" in hop {}'.format(msg))
+            logging.debug(f'No "from" in hop {msg}')
             reply_addresses.add('*')
         else:
             if 'err' in reply:
                 errors_in_hop.add(reply['err'])
             reply_addresses.add(reply['from'])
     if len(reply_addresses) == 0:
-        logging.debug('Traceroute did not reach destination: {}'
-                      .format(msg))
+        logging.debug(f'Traceroute did not reach destination: {msg}')
         stats['dnf'] += 1
         return True
     if hop['hop'] == 255:
@@ -111,10 +109,9 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         path.flag_too_many_hops()
         return False
     if len(reply_addresses) > 1:
-        logging.debug('Responses from different sources: {}.'
-                      .format(reply_addresses))
-        # Remove timeout placeholder from set (if
-        # applicable) so that a real IP is chosen.
+        logging.debug(f'Responses from different sources: {reply_addresses}.')
+        # Remove timeout placeholder from set (if applicable) so
+        # that a real IP is chosen.
         reply_addresses.discard('*')
     if errors_in_hop:
         # However unlikely it is that we have two different errors
@@ -178,39 +175,34 @@ def process_message(msg: dict,
         return dict()
     dst_asn = lookup.ip2asn(dst_addr)
     if dst_asn == '0':
-        logging.debug('Failed to look up destination AS for destination'
-                      ' address {}'.format(dst_addr))
+        logging.debug(f'Failed to look up destination AS for destination address {dst_addr}')
         stats['no_dst_asn'] += 1
         return dict()
     if target_asn is not None and dst_asn != target_asn:
         return dict()
     prefix = lookup.ip2prefix(dst_addr)
     if not prefix:
-        logging.debug('Failed to look up prefix for destination address {}'
-                      .format(dst_addr))
+        logging.debug(f'Failed to look up prefix for destination address {dst_addr}')
         stats['no_prefix'] += 1
         return dict()
     if 'from' not in msg or not msg['from']:
-        logging.debug('No "from" in result {}'.format(msg))
+        logging.debug(f'No "from" in result {msg}')
         stats['no_from'] += 1
         return dict()
     peer_asn = lookup.ip2asn(msg['from'])
     if peer_asn == '0':
-        logging.debug('Failed to look up peer_asn for peer_address {}'
-                      .format(msg['from']))
+        logging.debug(f'Failed to look up peer_asn for peer_address {msg["from"]}')
         stats['no_peer_asn'] += 1
         return dict()
     peer_prefix_tuple = (msg['from'], prefix)
     if peer_prefix_tuple in seen_peer_prefixes and not include_duplicates:
-        logging.debug('Skipping duplicate result for peer {} prefix {}'
-                      .format(*peer_prefix_tuple))
+        logging.debug('Skipping duplicate result for peer {} prefix {}'.format(*peer_prefix_tuple))
         stats['duplicate'] += 1
         return dict()
     if msg['prb_id'] in probe_ip_map \
             and msg['from'] != probe_ip_map[msg['prb_id']]:
-        logging.debug('Probe {} changed IP during time window. {} -> {}'
-                      .format(msg['prb_id'], probe_ip_map[msg['prb_id']],
-                              msg['from']))
+        logging.debug(f'Probe {msg["prb_id"]} changed IP during time window. '
+                      f'{probe_ip_map[msg["prb_id"]]} -> {msg["from"]}')
         stats['changed_ip'] += 1
     probe_ip_map[msg['prb_id']] = msg['from']
     stats['accepted'] += 1
@@ -225,8 +217,7 @@ def process_message(msg: dict,
     if reduced_path_len == 0:
         return dict()
     elif reduced_path_len == 1:
-        logging.debug('Reduced AS path is too short (=1 AS): {}'
-                      .format(reduced_path))
+        logging.debug(f'Reduced AS path is too short (=1 AS): {reduced_path}')
         stats['single_as'] += 1
         return dict()
     raw_path, raw_ip_path = path.get_raw_path()
@@ -367,7 +358,7 @@ def main() -> None:
         format=FORMAT, filename='traceroute_to_bgp.log',
         level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S'
     )
-    logging.info("Started: %s" % sys.argv)
+    logging.info(f'Started: {sys.argv}')
 
     args = parser.parse_args()
 
@@ -380,22 +371,19 @@ def main() -> None:
     start = parse_timestamp_argument(start_ts_argument)
     stop = parse_timestamp_argument(stop_ts_argument)
     if start == 0 or stop == 0:
-        logging.error('Invalid start or end time specified: {} {}'
-                      .format(start_ts_argument, stop_ts_argument))
+        logging.error(f'Invalid start or end time specified: {start_ts_argument} '
+                      f'{stop_ts_argument}')
         exit(1)
-    logging.info('Start timestamp: {} {}'
-                 .format(datetime.utcfromtimestamp(start)
-                         .strftime('%Y-%m-%dT%H:%M'), start))
-    logging.info('Stop timestamp: {} {}'
-                 .format(datetime.utcfromtimestamp(stop)
-                         .strftime('%Y-%m-%dT%H:%M'), stop))
+    logging.info(f'Start timestamp: {datetime.utcfromtimestamp(start).strftime("%Y-%m-%dT%H:%M")} '
+                 f'{start}')
+    logging.info(f'Stop timestamp: {datetime.utcfromtimestamp(stop).strftime("%Y-%m-%dT%H:%M")} '
+                 f'{stop}')
     ixp2as_timestamp_arg = args.ixp2as_timestamp
     ixp2as_timestamp = None
     if ixp2as_timestamp_arg is not None:
         ixp2as_timestamp = parse_timestamp_argument(ixp2as_timestamp_arg)
         if ixp2as_timestamp == 0:
-            logging.error(f'Invalid ixp2as timestamp specified: '
-                          f'{ixp2as_timestamp_arg}')
+            logging.error(f'Invalid ixp2as timestamp specified: {ixp2as_timestamp_arg}')
             sys.exit(1)
         ixp2as_timestamp *= 1000
 
@@ -406,7 +394,7 @@ def main() -> None:
     msm_ids = config.getcsvint('input', 'msm_ids', fallback=None)
     if msm_ids is not None:
         msm_ids = set(msm_ids)
-        logging.info('Filtering for msm ids: {}'.format(msm_ids))
+        logging.info(f'Filtering for msm ids: {msm_ids}')
 
     target_asn = config.get('input', 'target_asn', fallback=None)
     # Just in case somebody specifies an empty option, i.e.,
@@ -414,14 +402,14 @@ def main() -> None:
     if not target_asn:
         target_asn = None
     if target_asn is not None:
-        logging.info('Filtering for target ASN: {}'.format(target_asn))
+        logging.info(f'Filtering for target ASN: {target_asn}')
 
     prb_ids = config.get('input', 'prb_ids', fallback=None)
     if prb_ids is not None:
         prb_ids = read_probes(prb_ids)
         if len(prb_ids) == 0:
-            logging.warning(f'Specified prb_ids parameter resulted in an empty '
-                            f'set. Ignoring filter.')
+            logging.warning('Specified prb_ids parameter resulted in an empty set. Ignoring '
+                            'filter.')
             prb_ids = None
 
     output_timestamp_arg = args.output_timestamp
@@ -431,20 +419,20 @@ def main() -> None:
     else:
         unified_timestamp = convert_date_to_epoch(output_timestamp_arg)
         if unified_timestamp == 0:
-            logging.error('Invalid output time specified: {}'
-                          .format(output_timestamp_arg))
-    logging.info('Output timestamp: {} {}'
-                 .format(datetime.utcfromtimestamp(unified_timestamp)
-                         .strftime('%Y-%m-%dT%H:%M'), unified_timestamp))
+            logging.error(f'Invalid output time specified: {output_timestamp_arg}')
+    logging.info(f'Output timestamp: '
+                 f'{datetime.utcfromtimestamp(unified_timestamp).strftime("%Y-%m-%dT%H:%M")} '
+                 f'{unified_timestamp}')
 
     bootstrap_servers = config.get('kafka', 'bootstrap_servers')
-    include_duplicates = config.getboolean('input', 'include_duplicates',
-                                           fallback=False)
+    include_duplicates = config.getboolean('input', 'include_duplicates', fallback=False)
 
     lookup = IPLookup(config, ixp2as_timestamp)
     seen_peer_prefixes = set()
-    reader = KafkaReader([traceroute_kafka_topic], bootstrap_servers,
-                         start * 1000, stop * 1000)
+    reader = KafkaReader([traceroute_kafka_topic],
+                         bootstrap_servers,
+                         start * 1000,
+                         stop * 1000)
     writer = KafkaWriter(output_kafka_topic,
                          bootstrap_servers,
                          num_partitions=10,
@@ -452,17 +440,20 @@ def main() -> None:
                          config={'retention.ms': 5184000000})
     with reader, writer:
         for msg in reader.read():
-            data = process_message(msg, lookup, seen_peer_prefixes,
-                                   unified_timestamp, msm_ids, prb_ids,
-                                   target_asn, include_duplicates)
+            data = process_message(msg,
+                                   lookup,
+                                   seen_peer_prefixes,
+                                   unified_timestamp,
+                                   msm_ids,
+                                   prb_ids,
+                                   target_asn,
+                                   include_duplicates)
             if not data:
                 continue
             key = msg['prb_id']
             if type(key) == int:
                 key = key.to_bytes(4, byteorder='big')
-            writer.write(key,
-                         data,
-                         unified_timestamp * 1000)
+            writer.write(key, data, unified_timestamp * 1000)
     # Fake entry to force dump
     update_writer = KafkaWriter(output_kafka_topic_prefix + '_updates',
                                 bootstrap_servers,
