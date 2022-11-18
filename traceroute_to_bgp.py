@@ -161,10 +161,10 @@ def process_message(msg: dict,
                     lookup: IPLookup,
                     seen_peer_prefixes: set,
                     unified_timestamp: int,
-                    msm_ids=None,
-                    probe_ids=None,
-                    target_asn=None,
-                    include_duplicates=False) -> dict:
+                    msm_ids: set = None,
+                    probe_ids: set = None,
+                    target_asn: str = None,
+                    include_duplicates: bool = False) -> dict:
     if msm_ids is not None and msg['msm_id'] not in msm_ids \
             or probe_ids is not None and msg['prb_id'] not in probe_ids:
         return dict()
@@ -353,10 +353,12 @@ def main() -> None:
                         help='force output messages to this timestamp instead of the stop '
                              'timestamp')
     # Logging
-    FORMAT = '%(asctime)s %(processName)s %(message)s'
+    FORMAT = '%(asctime)s %(levelname)s %(message)s'
     logging.basicConfig(
-        format=FORMAT, filename='traceroute_to_bgp.log',
-        level=logging.INFO, datefmt='%Y-%m-%d %H:%M:%S'
+        format=FORMAT,
+        filename='traceroute_to_bgp.log',
+        level=logging.INFO,
+        datefmt='%Y-%m-%d %H:%M:%S'
     )
     logging.info(f'Started: {sys.argv}')
 
@@ -373,7 +375,7 @@ def main() -> None:
     if start == 0 or stop == 0:
         logging.error(f'Invalid start or end time specified: {start_ts_argument} '
                       f'{stop_ts_argument}')
-        exit(1)
+        sys.exit(1)
     logging.info(f'Start timestamp: {datetime.utcfromtimestamp(start).strftime("%Y-%m-%dT%H:%M")} '
                  f'{start}')
     logging.info(f'Stop timestamp: {datetime.utcfromtimestamp(stop).strftime("%Y-%m-%dT%H:%M")} '
@@ -435,7 +437,6 @@ def main() -> None:
                          stop * 1000)
     writer = KafkaWriter(output_kafka_topic,
                          bootstrap_servers,
-                         num_partitions=10,
                          # 2 months
                          config={'retention.ms': 5184000000})
     with reader, writer:
@@ -457,7 +458,6 @@ def main() -> None:
     # Fake entry to force dump
     update_writer = KafkaWriter(output_kafka_topic_prefix + '_updates',
                                 bootstrap_servers,
-                                num_partitions=10,
                                 # 2 months
                                 config={'retention.ms': 5184000000})
     with update_writer:
@@ -475,7 +475,6 @@ def main() -> None:
         update_writer.write(None, fake, (unified_timestamp + 1) * 1000)
     stats_writer = KafkaWriter(output_kafka_topic_prefix + '_stats',
                                bootstrap_servers,
-                               num_partitions=10,
                                # 2 months
                                config={'retention.ms': 5184000000})
     with stats_writer:
