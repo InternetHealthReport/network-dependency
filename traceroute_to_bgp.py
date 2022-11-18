@@ -40,6 +40,28 @@ stats = {'total': 0,
 probe_ip_map = dict()
 
 
+def parse_csv_int(value: str) -> list:
+    return list(map(int, value.split(',')))
+
+def check_config(config_file: str) -> configparser.ConfigParser:
+    config = configparser.ConfigParser(converters={'csvint': parse_csv_int})
+    config.read(config_file)
+    try:
+        config.get('input', 'kafka_topic')
+        config.get('output', 'kafka_topic_prefix')
+        config.get('kafka', 'bootstrap_servers')
+    except configparser.NoSectionError as e:
+        logging.error(f'Missing section in configuration file: {e}')
+        return configparser.ConfigParser()
+    except configparser.NoOptionError as e:
+        logging.error(f'Missing option in configuration file: {e}')
+        return configparser.ConfigParser()
+    except ValueError as e:
+        logging.error(f'Malformed option value in configuration file: {e}')
+        return configparser.ConfigParser()
+    return config
+
+
 def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
     if 'error' in hop:
         # Packet send failed.
@@ -328,17 +350,17 @@ def read_probes(probes: str) -> set:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
+    desc = """All timestamps can be specified as UNIX epoch in seconds or milliseconds, or in
+           YYYY-MM-DDThh:mm format"""
+    parser = argparse.ArgumentParser(description=desc)
     parser.add_argument('config')
-    parser.add_argument('-s', '--start', help='Start timestamp (as UNIX epoch '
-                                              'in seconds or milliseconds, or '
-                                              'in YYYY-MM-DDThh:mm format)')
-    parser.add_argument('-e', '--stop', help='Stop timestamp (as UNIX epoch '
-                                             'in seconds or milliseconds, or '
-                                             'in YYYY-MM-DDThh:mm format)')
+    parser.add_argument('start', help='start timestamp')
+    parser.add_argument('stop', help='stop timestamp')
     parser.add_argument('--ixp2as-timestamp',
-                        help='Start timestamp from which to reader ixp2as '
-                             'Kafka topic')
+                        help='timestamp from which to read ixp2as Kafka topic')
+    parser.add_argument('--output-timestamp',
+                        help='force output messages to this timestamp instead of the stop '
+                             'timestamp')
     # Logging
     FORMAT = '%(asctime)s %(processName)s %(message)s'
     logging.basicConfig(
@@ -349,17 +371,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # Read config
-    config = configparser.ConfigParser()
-    config.read(args.config)
-    start_ts_argument = config.get('input', 'start', fallback=None)
-    stop_ts_argument = config.get('input', 'stop', fallback=None)
-    if args.start is not None:
-        logging.info('Overriding config start timestamp.')
-        start_ts_argument = args.start
-    if args.stop is not None:
-        logging.info('Overriding config stop timestamp.')
-        stop_ts_argument = args.stop
+    config = check_config(args.config)
+    if not config.sections():
+        sys.exit(1)
+
+    start_ts_argument = args.start
+    stop_ts_argument = args.stop
     start = parse_timestamp_argument(start_ts_argument)
     stop = parse_timestamp_argument(stop_ts_argument)
     if start == 0 or stop == 0:
@@ -382,16 +399,23 @@ def main() -> None:
             sys.exit(1)
         ixp2as_timestamp *= 1000
 
-    traceroute_kafka_topic = config.get('input', 'kafka_topic',
-                                        fallback='ihr_atlas_traceroutev4')
-    output_kafka_topic_prefix = config.get('output', 'kafka_topic_prefix',
-                                           fallback='ihr_bgp_traceroutev4')
+    traceroute_kafka_topic = config.get('input', 'kafka_topic')
+    output_kafka_topic_prefix = config.get('output', 'kafka_topic_prefix')
     output_kafka_topic = output_kafka_topic_prefix + '_ribs'
-    msm_ids = config.get('input', 'msm_ids', fallback=None)
+
+    msm_ids = config.getcsvint('input', 'msm_ids', fallback=None)
     if msm_ids is not None:
-        msm_ids = set(map(int, msm_ids.split(',')))
+        msm_ids = set(msm_ids)
         logging.info('Filtering for msm ids: {}'.format(msm_ids))
+
     target_asn = config.get('input', 'target_asn', fallback=None)
+    # Just in case somebody specifies an empty option, i.e.,
+    # "target_asn = "
+    if not target_asn:
+        target_asn = None
+    if target_asn is not None:
+        logging.info('Filtering for target ASN: {}'.format(target_asn))
+
     prb_ids = config.get('input', 'prb_ids', fallback=None)
     if prb_ids is not None:
         prb_ids = read_probes(prb_ids)
@@ -399,22 +423,20 @@ def main() -> None:
             logging.warning(f'Specified prb_ids parameter resulted in an empty '
                             f'set. Ignoring filter.')
             prb_ids = None
-    if not target_asn:
-        target_asn = None
-    if target_asn is not None:
-        logging.info('Filtering for target ASN: {}'.format(target_asn))
-    output_timestamp = config.get('output', 'time', fallback=None)
-    if output_timestamp is None:
+
+    output_timestamp_arg = args.output_timestamp
+    if output_timestamp_arg is None:
         logging.warning('No output time specified. Using the stop timestamp.')
         unified_timestamp = stop
     else:
-        unified_timestamp = convert_date_to_epoch(output_timestamp)
+        unified_timestamp = convert_date_to_epoch(output_timestamp_arg)
         if unified_timestamp == 0:
             logging.error('Invalid output time specified: {}'
-                          .format(output_timestamp))
+                          .format(output_timestamp_arg))
     logging.info('Output timestamp: {} {}'
                  .format(datetime.utcfromtimestamp(unified_timestamp)
                          .strftime('%Y-%m-%dT%H:%M'), unified_timestamp))
+
     bootstrap_servers = config.get('kafka', 'bootstrap_servers')
     include_duplicates = config.getboolean('input', 'include_duplicates',
                                            fallback=False)
