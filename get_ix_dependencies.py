@@ -56,9 +56,9 @@ def read_hegemony_topic(reader: KafkaReader) -> dict:
             continue
         asn: str = msg['asn']
         scope: str = msg['scope']
-        if not asn.startswith('-') or scope == '-1':
+        if not asn.startswith('ix|') or ';' in asn or scope == '-1':
             continue
-        ix_id = int(asn.lstrip('-'))
+        ix_id = int(asn.lstrip('ix|'))
         ret[ix_id].append((msg['hege'], msg['scope'], msg['nb_peers']))
     return ret
 

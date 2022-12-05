@@ -102,10 +102,12 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         stats['dnf'] += 1
         return True
     if hop['hop'] == 255:
-        # Always interpret hop 255 as timeout. Some probes claim to
-        # reach the target at hop 255 without any previous replies,
-        # which is obviously not true.
-        path.append('0', '*')
+        # Always interpret hop 255 as timeout. Apparently Atlas sends
+        # a 'hail mary' probe with TTL 255 in case of a gap (i.e.,
+        # three or four timeouts in a row). So while the reply may be
+        # real it leads to paths which contain only this single reply
+        # and it all seems a bit fishy.
+        path.append('as|0', '*')
         path.flag_too_many_hops()
         return False
     if len(reply_addresses) > 1:
@@ -126,15 +128,14 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         for address in reply_addresses:
             ixp = lookup.ip2ixpid(address)
             if ixp != 0:
-                # We represent IXPs with negative "AS numbers".
-                as_set.append(f'-{ixp}')
-                as_set.append(f'-{ixp}_{lookup.ip2asn(address)}')
-                as_set.append(address)
+                as_set.append(f'ix|{ixp}')
+                as_set.append(f'ix|{ixp};as|{lookup.ip2asn(address)}')
+                as_set.append(f'ip|{address}')
                 # It is a bit stupid, but we need to keep the set
                 # sizes equal.
                 ip_set += [address] * 3
                 contains_ixp = True
-            as_set.append(lookup.ip2asn(address))
+            as_set.append(f'as|{lookup.ip2asn(address)}')
             ip_set.append(address)
         if errors_in_hop:
             path.mark_hop_error(error_str)
@@ -142,18 +143,17 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
     else:
         address = reply_addresses.pop()
         if address == '*':
-            path.append('0', '*')
+            path.append('as|0', '*')
         else:
+            if errors_in_hop:
+                path.mark_hop_error(error_str)
+            path.append(f'as|{lookup.ip2asn(address)}', address)
             ixp = lookup.ip2ixpid(address)
             if ixp != 0:
                 # We represent IXPs with negative "AS numbers".
-                path.append(f'-{ixp}', address, ixp=True)
-                path.append(f'-{ixp}_{lookup.ip2asn(address)}',
-                            address, ixp=True)
-                path.append(address, address, ixp=True)
-            if errors_in_hop:
-                path.mark_hop_error(error_str)
-            path.append(lookup.ip2asn(address), address)
+                path.append(f'ix|{ixp}', address, ixp=True)
+                path.append(f'ix|{ixp};as|{lookup.ip2asn(address)}', address, ixp=True)
+                path.append(f'ip|{address}', address, ixp=True)
     return False
 
 
@@ -212,8 +212,7 @@ def process_message(msg: dict,
     for hop in traceroute:
         if process_hop(msg, hop, lookup, path):
             return dict()
-    reduced_path, reduced_ip_path, reduced_path_len = path.get_reduced_path(
-        stats)
+    reduced_path, reduced_ip_path, reduced_path_len = path.get_reduced_path(stats)
     if reduced_path_len == 0:
         return dict()
     elif reduced_path_len == 1:

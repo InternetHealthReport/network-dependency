@@ -1,4 +1,5 @@
 import logging
+from typing import Tuple
 
 
 class ASPath:
@@ -7,8 +8,8 @@ class ASPath:
         self.ixp_nodes = list()
         self.reduced_ixp_nodes = list()
         self.reduced_ixp_nodes_updated = False
-        self.start_as = '0'
-        self.end_as = '0'
+        self.start_as = 'as|0'
+        self.end_as = 'as|0'
         self.attributes = dict()
         self.trailing_timeouts_pruned = False
 
@@ -34,9 +35,9 @@ class ASPath:
 
     def set_start_end_asn(self, start: str = '0', end: str = '0'):
         if start != '0':
-            self.start_as = start
+            self.start_as = f'as|{start}'
         if end != '0':
-            self.end_as = end
+            self.end_as = f'as|{end}'
 
     def flag_too_many_hops(self) -> None:
         self.attributes['too_many_hops'] = True
@@ -72,7 +73,70 @@ class ASPath:
         if cutoff > 0:
             # Remove all trailing * nodes and replace them with a single
             # * node.
-            self.nodes = self.nodes[:-cutoff] + [('0', '*')]
+            self.nodes = self.nodes[:-cutoff] + [('as|0', '*')]
+
+    @staticmethod
+    def __check_as_in_node(asn: str, node) -> Tuple[bool, bool]:
+        """Check if the specified asn is in the specified node.
+
+        Helper function that handles singleton/set nodes.
+        Returns a tuple of booleans that indicate if there was an
+        AS in the node and if this AS was the specified one."""
+        as_node = False
+        as_in_node = False
+        if isinstance(node, tuple):
+            # Set
+            for subnode in node:
+                if not subnode.startswith('as|'):
+                    continue
+                # There is at least one AS in the set.
+                as_node = True
+                if subnode == asn:
+                    # Abort early since node was found.
+                    as_in_node = True
+                    break
+        else:
+            # Singleton
+            if not node.startswith('as|'):
+                return as_node, as_in_node
+            as_node = True
+            if node == asn:
+                as_in_node = True
+        return as_node, as_in_node
+
+    def __check_start_as(self, as_path: list) -> bool:
+        """Return True if self.start_as is set and the first AS node
+        in the given AS path is different."""
+        if self.start_as == 'as|0':
+            return False
+        for node in as_path:
+            as_node, as_in_node = self.__check_as_in_node(self.start_as, node)
+            if not as_node:
+                # Skip leading non-AS nodes.
+                continue
+            # First AS node.
+            if not as_in_node:
+                return True
+            # No need to continue after first AS node.
+            break
+        return False
+
+    def __check_end_as(self, as_path: list) -> bool:
+        """Return True if self.start_as is set and the first AS node
+        in the given AS path is different."""
+        if self.end_as == 'as|0':
+            return False
+        for node in as_path[::-1]:
+            as_node, as_in_node = self.__check_as_in_node(self.end_as, node)
+            if not as_node:
+                # Skip trailing non-AS nodes.
+                continue
+            # Last AS node.
+            if not as_in_node:
+                return True
+            # No need to continue after first AS node.
+            break
+        return False
 
     def get_raw_path(self) -> (str, str):
         """Return the raw AS path as a space-separated list."""
@@ -116,7 +180,6 @@ class ASPath:
         unknown_hops = 0
         as_set_counted = False
         for idx, (as_, ip) in enumerate(self.nodes):
-            # TODO Check this
             if isinstance(as_, tuple):
                 # Handle set.
                 filtered_as_set = list()
@@ -124,15 +187,18 @@ class ASPath:
                 unknown_hops_in_set = 0
                 for sub_idx, entry in enumerate(as_):
                     # Filter duplicate and zero AS values.
-                    if entry == '0':
+                    if entry == 'as|0':
                         unknown_hops_in_set += 1
                         continue
-                    if entry in unique_as:
+                    # Only remove duplicate AS nodes, i.e., keep IXP
+                    # nodes, etc.
+                    if entry.startswith('as|') and entry in unique_as:
                         continue
                     filtered_as_set.append(entry)
                     filtered_ip_set.append(ip[sub_idx])
                     unique_as.add(entry)
                 if len(filtered_as_set) >= 1 and idx in self.ixp_nodes:
+                    # IXP in possible set, mark as such.
                     self.reduced_ixp_nodes.append(len(as_path))
                 if len(filtered_as_set) > 1:
                     if stats and not as_set_counted:
@@ -151,10 +217,10 @@ class ASPath:
                     unknown_hops += 1
             else:
                 # Handle normal hop.
-                if as_ == '0':
+                if as_ == 'as|0':
                     unknown_hops += 1
                     continue
-                if as_ in unique_as:
+                if as_.startswith('as|') and as_ in unique_as:
                     continue
                 if idx in self.ixp_nodes:
                     self.reduced_ixp_nodes.append(len(as_path))
@@ -165,36 +231,41 @@ class ASPath:
         # failed mapping.
         self.attributes['unknown_reduction'] = (unknown_hops / len(self.nodes)) * 100
         if len(as_path) == 0:
-            logging.debug('Empty path after filtering: {}'
-                          .format(self.nodes))
+            logging.debug(f'Empty path after filtering: {self.nodes}')
             if stats:
                 stats['empty_path'] += 1
             return str(), str(), 0
-        if self.start_as != '0' and as_path[0] != self.start_as:
+        if self.__check_start_as(as_path):
+            # The path does not begin with the specified start AS.
             if self.start_as in unique_as:
-                stats['start_as_in_path'] += 1
+                # The specified start AS is somewhere in the path,
+                # but not the beginning. Best to ignore.
+                if stats:
+                    stats['start_as_in_path'] += 1
                 return str(), str(), 0
             if stats:
                 stats['start_as_missing'] += 1
             self.attributes['start_as_missing'] = True
-            logging.debug('Path does not begin with specified start AS: {}. '
-                          'Prepending it now.'
-                          .format(self.start_as))
+            logging.debug(f'Path does not begin with specified start AS: {self.start_as}. '
+                          'Prepending it now.')
             as_path.insert(0, self.start_as)
             ip_path.insert(0, '*')
             # Shift IXP indexes, since we added a node at the beginning
             # of the path after the index calculation.
             self.reduced_ixp_nodes = [e + 1 for e in self.reduced_ixp_nodes]
-        if self.end_as != '0' and as_path[-1] != self.end_as:
+        if self.__check_end_as(as_path):
+            # The path does not end with the specified end AS.
             if self.end_as in unique_as:
-                stats['end_as_in_path'] += 1
+                # The specified end AS is somewhere in the path,
+                # but not the end. Best to ignore.
+                if stats:
+                    stats['end_as_in_path'] += 1
                 return str(), str(), 0
             if stats:
                 stats['end_as_missing'] += 1
             self.attributes['end_as_missing'] = True
-            logging.debug('Path does not end with specified end AS: {}. '
-                          'Appending it now.'
-                          .format(self.end_as))
+            logging.debug(f'Path does not end with specified end AS: {self.end_as}. Appending it '
+                          f'now.')
             as_path.append(self.end_as)
             ip_path.append('*')
         # Assemble string

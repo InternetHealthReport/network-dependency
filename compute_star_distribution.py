@@ -9,12 +9,27 @@ from network_dependency.utils.helper_functions import \
     parse_timestamp_argument, check_key, check_keys
 
 
+def get_scope(hops: list) -> str:
+    for hop in hops[::-1]:
+        scope = parse_hop(hop)
+        if len(scope) > 1:
+            logging.warning(f'Skipping AS set scope: {hops}')
+            return str()
+        elif len(scope) == 1:
+            return scope[0]
+    logging.warning(f'No scope found in hops: {hops}')
+    return str()
+
+
 def parse_hop(hop: str) -> list:
     if not hop:
         return list()
     if hop.startswith('{'):
-        return list(hop.strip('{}').split(','))
-    return [hop]
+        set_hops = hop.strip('{}').split(',')
+        return [e.lstrip('as|') for e in filter(lambda s: s.startswith('as|'), set_hops)]
+    elif not hop.startswith('as|'):
+        return list()
+    return [hop.lstrip('as|')]
 
 
 def get_star_distribution(ip_path: str) -> tuple:
@@ -43,9 +58,8 @@ def process_msg(msg: dict, data: dict) -> None:
         if not as_path:
             logging.error(f'Empty AS path: {msg}')
             continue
-        scope = as_path[-1]
-        if scope.startswith('{'):
-            logging.warning(f'Skipping AS set scope: {msg}')
+        scope = get_scope(as_path)
+        if not scope:
             continue
         for hop in as_path:
             for asn in parse_hop(hop):
