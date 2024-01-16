@@ -147,13 +147,13 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         else:
             if errors_in_hop:
                 path.mark_hop_error(error_str)
-            path.append(f'as|{lookup.ip2asn(address)}', address)
             ixp = lookup.ip2ixpid(address)
             if ixp != 0:
                 # We represent IXPs with negative "AS numbers".
                 path.append(f'ix|{ixp}', address, ixp=True)
                 path.append(f'ix|{ixp};as|{lookup.ip2asn(address)}', address, ixp=True)
                 path.append(f'ip|{address}', address, ixp=True)
+            path.append(f'as|{lookup.ip2asn(address)}', address)
     return False
 
 
