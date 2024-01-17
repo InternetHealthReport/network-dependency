@@ -95,7 +95,9 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
             reply_addresses.add('*')
         else:
             if 'err' in reply:
-                errors_in_hop.add(reply['err'])
+                # Unrecognized error codes are represented as integers so convert
+                # everything to string.
+                errors_in_hop.add(str(reply['err']))
             reply_addresses.add(reply['from'])
     if len(reply_addresses) == 0:
         logging.debug(f'Traceroute did not reach destination: {msg}')
@@ -119,13 +121,13 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         # However unlikely it is that we have two different errors
         # present in replies for the same hop, just in case, handle it.
         # For a single error, this results in a normal string.
-        error_str = ' '.join(map(str, errors_in_hop))
+        error_str = ' '.join(map(str, sorted(errors_in_hop)))
     if len(reply_addresses) > 1:
         # Still a set after * removal. Add as set.
         as_set = list()
         ip_set = list()
         contains_ixp = False
-        for address in reply_addresses:
+        for address in sorted(reply_addresses):
             ixp = lookup.ip2ixpid(address)
             if ixp != 0:
                 as_set.append(f'ix|{ixp}')
