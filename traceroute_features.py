@@ -27,11 +27,6 @@ def check_config(config_path: str) -> configparser.ConfigParser:
         config.get('input', 'mode')
         config.get('output', 'kafka_topic')
         config.get('kafka', 'bootstrap_servers')
-        config.get('ip2asn', 'path')
-        config.get('ip2asn', 'db')
-        config.get('ip2ixp', 'kafka_bootstrap_servers')
-        config.get('ip2ixp', 'ix_kafka_topic')
-        config.get('ip2ixp', 'netixlan_kafka_topic')
         if config.get('input', 'mode') == 'kafka':
             config.get('input', 'kafka_topic')
     except configparser.NoSectionError as e:
@@ -261,6 +256,9 @@ def main() -> None:
     output_topic = config.get('output', 'kafka_topic')
 
     lookup = IPLookup(config, ixp2as_timestamp)
+    if not lookup.initialized:
+        logging.error('Error during iplookup initialization.')
+        sys.exit(1)
     writer = KafkaWriter(output_topic,
                          bootstrap_servers,
                          num_partitions=10,
@@ -281,3 +279,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+    sys.exit(0)

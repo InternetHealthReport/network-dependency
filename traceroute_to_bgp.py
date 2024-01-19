@@ -431,6 +431,9 @@ def main() -> None:
     include_duplicates = config.getboolean('input', 'include_duplicates', fallback=False)
 
     lookup = IPLookup(config, ixp2as_timestamp)
+    if not lookup.initialized:
+        logging.error('Error during iplookup initialization.')
+        sys.exit(1)
     seen_peer_prefixes = set()
     reader = KafkaReader([traceroute_kafka_topic],
                          bootstrap_servers,
@@ -495,3 +498,4 @@ def main() -> None:
 
 if __name__ == '__main__':
     main()
+    sys.exit(0)
