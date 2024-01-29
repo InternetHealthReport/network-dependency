@@ -103,6 +103,13 @@ def process_hop(msg: dict, hop: dict, lookup: IPLookup, path: ASPath) -> bool:
         logging.debug(f'Traceroute did not reach destination: {msg}')
         stats['dnf'] += 1
         return True
+    if 'hop' not in hop:
+        # I write "Should never happen", but I add this because it _did_ happen.
+        # There was one instance where the hop field used key 'hgp'... Not sure if this
+        # was a cosmic ray flipping a bit or what.
+        logging.error(f'"hop" field missing, but no "error" in hop. Should never happen: {hop}')
+        stats['dnf'] += 1
+        return True
     if hop['hop'] == 255:
         # Always interpret hop 255 as timeout. Apparently Atlas sends
         # a 'hail mary' probe with TTL 255 in case of a gap (i.e.,
