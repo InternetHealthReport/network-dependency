@@ -88,7 +88,7 @@ def msg_generator(msg_source, mode: str, start_ts: int, stop_ts: int) -> dict:
 
 
 def process_hop(hop: dict, seen_ips: set, lookup: IPLookup) -> dict:
-    if 'error' in hop or hop['hop'] == 255:
+    if 'error' in hop or 'hop' not in hop or hop['hop'] == 255:
         # Packet send failed or end of traceroute reached.
         return
     replies = hop['result']
